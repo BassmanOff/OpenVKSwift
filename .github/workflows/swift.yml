@@ -1,4 +1,4 @@
-name: OVK Build IPA
+name: OVK Build
 
 on:
   push:
@@ -6,30 +6,23 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-13
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build app
+      - name: Show Xcode
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Build OVK
         run: |
           xcodebuild \
-            -project OVK.xcodeproj \
+            -project OVK/OVK.xcodeproj \
             -scheme OVK \
             -configuration Release \
             -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             build
-
-      - name: Package IPA
-        run: |
-          mkdir -p Payload
-          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d | head -n 1)
-          cp -R "$APP_PATH" Payload/
-          zip -r OVK.ipa Payload
-
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: OVK
-          path: OVK.ipa
