@@ -13,9 +13,10 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
-    # Чтобы подпись не сбрасывалась на «None» при регенерации — впиши сюда свой Team ID
-    # (Xcode → Settings → Accounts → выбери аккаунт → Team; или Keychain). Например:
-    # DEVELOPMENT_TEAM: ABCDE12345
+    # Team ID личной команды (бесплатный Apple ID) — держим здесь, чтобы подпись
+    # не сбрасывалась на «None» при xcodegen generate. Сертификат бесплатной команды
+    # живёт 7 дней; переподписывать = пересобрать в Xcode.
+    DEVELOPMENT_TEAM: B7VRZXM5FC
 
 targets:
   OVK:
