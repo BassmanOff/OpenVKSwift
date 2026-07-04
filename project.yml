@@ -7,13 +7,15 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "0.1.0"
+    # ВЕРСИЮ И TEAM ДЕРЖИМ ЗДЕСЬ — иначе xcodegen generate сбрасывает их
+    # (проект пересобирается из этого файла, ручные правки в Xcode не сохраняются).
+    MARKETING_VERSION: "0.4.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
-    # Подставь свой Team (бесплатный Apple ID) в Xcode → Signing & Capabilities,
-    # либо раскомментируй и впиши сюда:
-    # DEVELOPMENT_TEAM: XXXXXXXXXX
+    # Чтобы подпись не сбрасывалась на «None» при регенерации — впиши сюда свой Team ID
+    # (Xcode → Settings → Accounts → выбери аккаунт → Team; или Keychain). Например:
+    # DEVELOPMENT_TEAM: ABCDE12345
 
 targets:
   OVK:
