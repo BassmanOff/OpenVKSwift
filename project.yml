@@ -1,0 +1,90 @@
+name: OVK
+options:
+  bundleIdPrefix: com.ovkclient
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    # Подставь свой Team (бесплатный Apple ID) в Xcode → Signing & Capabilities,
+    # либо раскомментируй и впиши сюда:
+    # DEVELOPMENT_TEAM: XXXXXXXXXX
+
+targets:
+  OVK:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Sources
+    dependencies:
+      # VLC-плеер для видео с MP3-в-MP4 (AVFoundation такой звук не декодит).
+      - framework: Vendor/MobileVLCKit.xcframework
+        embed: true
+        codeSign: true
+      # Системные зависимости MobileVLCKit (при ручной линковке без CocoaPods).
+      - sdk: AVFoundation.framework
+      - sdk: AudioToolbox.framework
+      - sdk: CoreAudio.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreVideo.framework
+      - sdk: VideoToolbox.framework
+      - sdk: CoreGraphics.framework
+      - sdk: CoreText.framework
+      - sdk: QuartzCore.framework
+      - sdk: OpenGLES.framework
+      - sdk: Security.framework
+      - sdk: CFNetwork.framework
+      - sdk: MediaPlayer.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: libc++.tbd
+      - sdk: libiconv.tbd
+      - sdk: libxml2.tbd
+      - sdk: libz.tbd
+      - sdk: libbz2.tbd
+    # Схема запуска: глушим системный os_log-поток в консоли Xcode —
+    # тысячи строк на каждый жест уходят через отладочный мост синхронно
+    # и роняют производительность (наши print при этом остаются видны).
+    scheme:
+      environmentVariables:
+        - variable: OS_ACTIVITY_MODE
+          value: disable
+          isEnabled: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ovkclient.app
+        PRODUCT_NAME: OpenVK
+        TARGETED_DEVICE_FAMILY: "1"   # 1 = iPhone
+        GENERATE_INFOPLIST_FILE: NO
+        CLANG_CXX_LIBRARY: "libc++"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Support/Info.plist
+      properties:
+        CFBundleDisplayName: OpenVK
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        # фоновое воспроизведение музыки + периодическая фоновая проверка сообщений
+        UIBackgroundModes:
+          - audio
+          - fetch
+        # Идентификаторы фоновых задач (BGAppRefresh — проверка новых сообщений)
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.ovkclient.app.refresh
+        # Разрешаем ландшафт на уровне приложения; AppDelegate ограничивает портретом везде,
+        # кроме полноэкранного видео.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        ITSAppUsesNonExemptEncryption: false
+        # Для сохранения фото из просмотрщика в «Фото» (только добавление).
+        NSPhotoLibraryAddUsageDescription: Сохранение фотографий в вашу медиатеку.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true   # разрешаем HTTP-инстансы (openvk.xyz)
