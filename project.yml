@@ -73,7 +73,8 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
-        # фоновое воспроизведение музыки + периодическая фоновая проверка сообщений
+        # фоновое воспроизведение музыки + фоновый режим уведомлений (тихое аудио)
+        # + периодическая фоновая проверка сообщений.
         UIBackgroundModes:
           - audio
           - fetch

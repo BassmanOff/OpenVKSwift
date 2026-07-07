@@ -74,6 +74,18 @@ struct OVKClient {
         throw OVKError.empty
     }
 
+    /// Разбирает СЫРОЕ тело метода в T (или бросает ошибку API), как это делает `call`.
+    /// Для дискового кэша: перекодировать сложные Decodable-модели (Post/User) в Encodable
+    /// дорого и хрупко — проще хранить исходный JSON и декодировать его этим методом.
+    static func decode<T: Decodable>(_ raw: Data) throws -> T {
+        let envelope = try JSONDecoder().decode(Envelope<T>.self, from: raw)
+        if let code = envelope.errorCode {
+            throw OVKError.api(code: code, message: envelope.errorMsg ?? "Ошибка \(code)")
+        }
+        guard let response = envelope.response else { throw OVKError.empty }
+        return response
+    }
+
     /// Сырой JSON-ответ метода целиком — для диагностики (например, что сервер отдаёт по «обрабатываемому» треку).
     func rawResponse(_ method: String, params: [String: String] = [:]) async throws -> String {
         let endpoint = instance.apiURL
