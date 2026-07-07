@@ -105,22 +105,28 @@ struct PostRow: View {
     private func photosView(_ photos: [Photo]) -> some View {
         if photos.count == 1, let photo = photos.first {
             // Одно фото — показываем целиком в его пропорциях (без кадрирования).
+            // .clipped() НЕ ограничивает хит-тест: невидимый «хвост» фото перехватывал бы
+            // тапы соседних элементов. Тап ловит оверлей photoHeroSource, картинке хит не нужен.
             CachedImage(url: photo.bestURL) { OVK.Palette.background }
                 .aspectRatio(photo.aspectRatio ?? 1.4, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
                 .cornerRadius(6)
+                .allowsHitTesting(false)
                 .photoHeroSource(photos: photos, index: 0, post: post, coordinator: photoHero)
         } else if !photos.isEmpty {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)], spacing: 2) {
                 ForEach(Array(photos.enumerated()), id: \.element.id) { i, photo in
                     // Размер ячейки задаёт Color.clear, фото — оверлеем с обрезкой.
                     // Так картинка не «распирает» ячейку и не наезжает на соседей.
+                    // .clipped() НЕ ограничивает хит-тест: невидимый «хвост» .fill-картинки
+                    // ложился бы поверх соседних ячеек и «съедал» их тапы.
                     Color.clear
                         .frame(maxWidth: .infinity)
                         .frame(height: 120)
                         .overlay(
                             CachedImage(url: photo.thumbURL, contentMode: .fill) { OVK.Palette.background }
+                                .allowsHitTesting(false)
                         )
                         .clipped()
                         .cornerRadius(4)

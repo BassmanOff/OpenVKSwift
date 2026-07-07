@@ -8,17 +8,16 @@ struct RootView: View {
     @EnvironmentObject private var longPoll: LongPollService
 
     var body: some View {
-        ZStack {
-            Group {
-                if settings.isLoggedIn {
-                    MainTabView()
-                } else {
-                    LoginView()
-                }
+        Group {
+            if settings.isLoggedIn {
+                MainTabView()
+            } else {
+                LoginView()
             }
-            // Просмотрщик фото «вылетает» из миниатюры — оверлей поверх всего (включая таб-бар).
-            PhotoHeroOverlay()
         }
+        // Просмотрщик фото живёт в отдельном окне поверх всего приложения —
+        // включая sheet'ы (страницы, открытые по ссылке). Здесь только монтируем его.
+        .background(PhotoHeroWindowMount())
         .onAppear {
             player.attach(downloads: downloads)
             player.attach(settings: settings)
@@ -36,6 +35,10 @@ struct RootView: View {
                 longPoll.stop()
                 ConversationsViewModel.clearCache()
                 ChatViewModel.clearAllCaches()
+                // Кэши ленты и профилей — тоже личные данные.
+                NewsfeedViewModel.clearCache()
+                ProfileViewModel.clearCache()
+                WallViewModel.clearCache()
             }
         }
     }

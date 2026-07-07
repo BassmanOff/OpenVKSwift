@@ -68,7 +68,7 @@ struct SettingsView: View {
                 }
                 Section(
                     header: Text("Уведомления"),
-                    footer: Text("Мгновенно — пока приложение открыто или в фоне играет музыка; при закрытом приложении iOS проверяет новые сообщения периодически (обычно раз в 15–60 минут).")
+                    footer: Text(notificationsFooter)
                 ) {
                     Toggle("Сообщения", isOn: Binding(
                         get: { settings.notifyMessages },
@@ -83,13 +83,36 @@ struct SettingsView: View {
                                         BackgroundRefresh.schedule()
                                     }
                                 }
+                            } else {
+                                // Нет уведомлений — фоновый режим бессмыслен.
+                                settings.backgroundKeepAlive = false
                             }
                         }
                     ))
 
-                    if settings.notifyMessages, bgRefreshStatus != .available {
+                    Toggle("Фоновый режим (мгновенно)", isOn: Binding(
+                        get: { settings.backgroundKeepAlive },
+                        set: { enabled in
+                            settings.backgroundKeepAlive = enabled
+                            // Фоновый режим показывает уведомления → включаем «Сообщения»
+                            // и спрашиваем разрешение, если ещё не дано.
+                            if enabled, !settings.notifyMessages {
+                                settings.notifyMessages = true
+                                Task {
+                                    if await !NotificationService.requestPermission() {
+                                        settings.notifyMessages = false
+                                        settings.backgroundKeepAlive = false
+                                    } else {
+                                        BackgroundRefresh.schedule()
+                                    }
+                                }
+                            }
+                        }
+                    ))
+
+                    if settings.notifyMessages, !settings.backgroundKeepAlive, bgRefreshStatus != .available {
                         Label(
-                            "«Обновление контента» отключено в iOS — при закрытом приложении уведомления приходить не будут. Включите: Настройки → Основные → Обновление контента.",
+                            "«Обновление контента» отключено в iOS — при закрытом приложении уведомления приходить не будут. Включите: Настройки → Основные → Обновление контента, либо включите «Фоновый режим» выше.",
                             systemImage: "exclamationmark.triangle.fill"
                         )
                         .font(.footnote)
@@ -102,13 +125,6 @@ struct SettingsView: View {
                     footer: Text("Даунсэмплинг и фоновое декодирование: меньше памяти и плавнее скролл, но картинка появляется чуть позже. Выключите, чтобы сравнить — действует сразу.")
                 ) {
                     Toggle("Оптимизация изображений", isOn: $settings.imageOptimization)
-                }
-
-                Section(
-                    header: Text("Видео (отладка)"),
-                    footer: Text("Новый движок играет нативные видео системным плеером (без VLC): первый просмотр требует подготовки, повторный — мгновенный. Выключите, чтобы вернуться на VLC, если что-то не играет.")
-                ) {
-                    Toggle("Видео без VLC", isOn: $settings.nativeVideoEngine)
                 }
 
                 Section(
@@ -141,7 +157,9 @@ struct SettingsView: View {
                         URLCache.shared.removeAllCachedResponses()
                         ImageCache.shared.removeAll()
                         RepostCache.shared.clear()
-                        NativeVideoCache.clear()
+                        NewsfeedViewModel.clearCache()
+                        ProfileViewModel.clearCache()
+                        WallViewModel.clearCache()
                         Self.terminate()
                     }
                 }
@@ -161,6 +179,16 @@ struct SettingsView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+
+    private var notificationsFooter: String {
+        """
+        «Фоновый режим» держит приложение подключённым тихим аудио — сообщения приходят \
+        мгновенно даже при закрытом экране (расход батареи ~1–3%/час, пока не играет музыка). \
+        Без него уведомления приходят мгновенно только когда приложение открыто или в фоне \
+        играет музыка, иначе iOS проверяет их периодически (раз в 15–60 минут). \
+        В любом случае НЕ смахивайте приложение из свитчера — это убивает фоновую работу.
+        """
     }
 
     /// Закрывает приложение после очистки кэша (перезапуск всё равно нужен).

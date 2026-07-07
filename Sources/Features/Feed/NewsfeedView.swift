@@ -4,6 +4,9 @@ import SwiftUI
 struct NewsfeedView: View {
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var model = NewsfeedViewModel()
+    /// «Ответы» — активность (лайки/комменты/упоминания/заявки). Живёт здесь ради бейджа
+    /// на колокольчике; экран открывается пушем и переиспользует эту же модель.
+    @StateObject private var activity = ActivityViewModel()
 
     var body: some View {
         NavigationView {
@@ -25,7 +28,35 @@ struct NewsfeedView: View {
             .background(OVK.Palette.background.ignoresSafeArea())
             .navigationTitle("Новости")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink {
+                        ActivityView(model: activity)
+                    } label: {
+                        Image(systemName: "bell")
+                            .overlay(alignment: .topTrailing) {
+                                if activity.unreadCount > 0 {
+                                    Text(activity.unreadCount > 99 ? "99+" : "\(activity.unreadCount)")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.red))
+                                        .offset(x: 11, y: -8)
+                                }
+                            }
+                    }
+                }
+            }
             .task { await model.loadIfNeeded(settings: settings) }
+            .task {
+                // Активность для бейджа: грузим и периодически освежаем, пока лента открыта.
+                await activity.loadIfNeeded(settings: settings)
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 90 * 1_000_000_000)
+                    await activity.reload(settings: settings)
+                }
+            }
         }
         // Явный stack-стиль: без него NavigationView в кастомном контейнере может
         // выбрать split-раскладку с некорректным позиционированием навбара (iOS 15).

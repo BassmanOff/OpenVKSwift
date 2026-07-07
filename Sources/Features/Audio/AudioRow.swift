@@ -8,6 +8,9 @@ struct AudioRow: View {
     var showAddToLibrary: Bool = true
     /// Показывать ли зелёную галочку «уже в моей музыке» (полезно в поиске).
     var showAddedBadge: Bool = false
+    /// Встроенное контекст-меню SwiftUI. ВЫКЛЮЧАЙТЕ внутри ячейки List с другим контентом
+    /// (посты в ленте): там SwiftUI вешает long-press на ВСЮ ячейку, а не на строку трека.
+    var showsContextMenu: Bool = true
 
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: AudioDownloadManager
@@ -67,6 +70,14 @@ struct AudioRow: View {
     }
 
     var body: some View {
+        if showsContextMenu {
+            core.contextMenu { menuItems }
+        } else {
+            core
+        }
+    }
+
+    private var core: some View {
         HStack(spacing: 12) {
             leading
 
@@ -102,32 +113,34 @@ struct AudioRow: View {
                 extraCover = await CoverArtService.shared.cover(artist: track.artist, title: track.title)
             }
         }
-        .contextMenu {
-            if canPlay {
-                Button {
-                    player.playNext(track)
-                } label: {
-                    Label("Играть следующим", systemImage: "play.circle")
-                }
-                Button {
-                    player.enqueue(track)
-                } label: {
-                    Label("В конец очереди", systemImage: "list.bullet")
-                }
+    }
+
+    @ViewBuilder
+    private var menuItems: some View {
+        if canPlay {
+            Button {
+                player.playNext(track)
+            } label: {
+                Label("Играть следующим", systemImage: "play.circle")
             }
-            if showAddToLibrary {
-                if library.isAdded(track) {
-                    Button(role: .destructive) {
-                        library.toggleTrack(track, settings: settings)
-                    } label: {
-                        Label("Убрать из моей музыки", systemImage: "minus.circle")
-                    }
-                } else {
-                    Button {
-                        library.toggleTrack(track, settings: settings)
-                    } label: {
-                        Label("Добавить к себе", systemImage: "plus.circle")
-                    }
+            Button {
+                player.enqueue(track)
+            } label: {
+                Label("В конец очереди", systemImage: "list.bullet")
+            }
+        }
+        if showAddToLibrary {
+            if library.isAdded(track) {
+                Button(role: .destructive) {
+                    library.toggleTrack(track, settings: settings)
+                } label: {
+                    Label("Убрать из моей музыки", systemImage: "minus.circle")
+                }
+            } else {
+                Button {
+                    library.toggleTrack(track, settings: settings)
+                } label: {
+                    Label("Добавить к себе", systemImage: "plus.circle")
                 }
             }
         }

@@ -4,7 +4,14 @@ struct MainTabView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var longPoll: LongPollService
+    @EnvironmentObject private var keepAlive: KeepAliveService
     @Environment(\.scenePhase) private var scenePhase
+
+    /// Держим ли процесс живым в фоне (тихое аудио) — когда музыка не играет.
+    /// Если да, LongPoll не глушим при уходе в фон → мгновенные уведомления.
+    private var backgroundStaysAlive: Bool {
+        player.isPlaying || settings.backgroundKeepAlive
+    }
 
     private enum Tab { case feed, messages, music, profile }
     @State private var selection: Tab = .feed
@@ -28,6 +35,14 @@ struct MainTabView: View {
         }
         .task {
             longPoll.start(settings: settings)
+            // Уведомления включены по умолчанию — спрашиваем системное разрешение при
+            // первом запуске (idempotent: если уже отвечали, повторного алерта нет) и
+            // планируем фоновую проверку.
+            if settings.notifyMessages {
+                if await NotificationService.requestPermission() {
+                    BackgroundRefresh.schedule()
+                }
+            }
             // Пока приложение открыто — держим статус «онлайн» (окно 5 мин, пингуем чаще).
             while !Task.isCancelled {
                 settings.reportOnline()
@@ -58,28 +73,40 @@ struct MainTabView: View {
             )
         }
         .onChange(of: player.isPlaying) { playing in
-            // Музыку возобновили из Пункта управления, находясь в фоне: процесс снова
-            // жив (аудио-фон), но scenePhase НЕ меняется — LongPoll перезапускаем вручную.
             if playing {
+                keepAlive.stop() // музыка сама держит процесс — тихое аудио не нужно
+                // Музыку возобновили из Пункта управления в фоне: scenePhase НЕ меняется —
+                // LongPoll перезапускаем вручную.
                 if scenePhase != .active { longPoll.start(settings: settings) }
             } else if scenePhase == .background {
-                longPoll.stop() // музыка встала в фоне — iOS скоро заморозит процесс
+                // Музыка встала в фоне. Если включён фоновый режим — подхватываем тихим
+                // аудио, чтобы процесс не заснул и LongPoll продолжал работать.
+                if settings.backgroundKeepAlive {
+                    keepAlive.start()
+                } else {
+                    longPoll.stop()
+                }
             }
         }
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active:
+                keepAlive.stop() // на экране тихое аудио не нужно
                 settings.reportOnline()
                 longPoll.start(settings: settings) // после фона переподключаемся
                 Task { await conversations.load(settings: settings) } // догоняем пропущенное
             case .background:
-                // Пока играет музыка, приложение живёт в фоне (UIBackgroundModes audio) —
-                // оставляем LongPoll работать: сообщения придут мгновенно как уведомления.
-                if !player.isPlaying {
-                    longPoll.stop() // без музыки iOS всё равно заморозит соединение
+                // Держим процесс живым (музыка ИЛИ фоновый режим) → LongPoll не глушим,
+                // сообщения приходят мгновенно как уведомления.
+                if backgroundStaysAlive {
+                    if !player.isPlaying { keepAlive.start() } // тихое аудио вместо музыки
+                } else {
+                    longPoll.stop() // ничего не держит процесс — iOS его заморозит
                 }
-                if settings.notifyMessages {
-                    BackgroundRefresh.schedule() // периодическая проверка при закрытом приложении
+                // Планируем фоновую задачу всегда (при входе): она и обновляет кэш ленты,
+                // и — если включены — проверяет новые сообщения.
+                if settings.isLoggedIn {
+                    BackgroundRefresh.schedule()
                 }
             default:
                 break

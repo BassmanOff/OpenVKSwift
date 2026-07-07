@@ -18,7 +18,12 @@ final class ProfileViewModel: ObservableObject {
 
     func load(userID: Int, settings: AppSettings) async {
         guard let token = settings.token else { return }
-        isLoading = true
+        // Мгновенно показываем закэшированный профиль — не ждём сеть при запуске.
+        if user == nil, let data = Self.loadCache(userID: userID),
+           let cached: [User] = try? OVKClient.decode(data) {
+            user = cached.first
+        }
+        isLoading = (user == nil)
         errorMessage = nil
         defer { isLoading = false }
 
@@ -29,15 +34,42 @@ final class ProfileViewModel: ObservableObject {
         )
         do {
             // user_ids=0 → текущий пользователь; ответ — массив в response.
-            let users: [User] = try await client.call(
+            let raw = Data(try await client.rawResponse(
                 "users.get",
                 params: ["user_ids": String(userID), "fields": Self.fields]
-            )
+            ).utf8)
+            let users: [User] = try OVKClient.decode(raw)
             user = users.first
             loaded = true
+            Self.saveCache(raw, userID: userID)
         } catch {
             if error.isCancellation { return }
-            errorMessage = error.localizedDescription
+            // Кэш остаётся — ошибку показываем только если и его нет.
+            if user == nil { errorMessage = error.localizedDescription }
+        }
+    }
+
+    // MARK: - Дисковый кэш профиля (виден сразу при запуске)
+
+    private static func cacheURL(userID: Int) -> URL {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("profile_cache_\(userID).json")
+    }
+
+    private static func saveCache(_ raw: Data, userID: Int) {
+        try? raw.write(to: cacheURL(userID: userID), options: .atomic)
+    }
+
+    private static func loadCache(userID: Int) -> Data? {
+        try? Data(contentsOf: cacheURL(userID: userID))
+    }
+
+    /// Стирает все кэши профилей (при выходе из аккаунта).
+    static func clearCache() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let files = (try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.lastPathComponent.hasPrefix("profile_cache_") {
+            try? FileManager.default.removeItem(at: file)
         }
     }
 }

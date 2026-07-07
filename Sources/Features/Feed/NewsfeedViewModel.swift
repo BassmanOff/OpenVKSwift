@@ -44,6 +44,9 @@ final class NewsfeedViewModel: ObservableObject {
     func loadIfNeeded(settings: AppSettings) async {
         guard !loaded else { return }
         loaded = true
+        // Мгновенно показываем закэшированную ленту (в т.ч. обновлённую в фоне BGAppRefresh),
+        // потом тихо обновляем сетью — пользователь не ждёт «пустой» экран.
+        if posts.isEmpty { applyCache() }
         await reload(settings: settings)
     }
 
@@ -58,7 +61,17 @@ final class NewsfeedViewModel: ObservableObject {
         nextFrom = nil
         canLoadMore = true
         errorMessage = nil
+        applyCache() // кэш этой ленты, если есть — мгновенно
         await reload(settings: settings)
+    }
+
+    /// Подставляет закэшированную первую страницу текущей ленты (если она есть).
+    private func applyCache() {
+        guard let data = Self.loadCache(kind: kind),
+              let res: Response = try? OVKClient.decode(data) else { return }
+        mergeAuthors(res)
+        posts = dedup(res.items)
+        nextFrom = res.nextFrom
     }
 
     /// Загружает первую страницу. Старые посты остаются на экране до прихода свежих.
@@ -70,12 +83,15 @@ final class NewsfeedViewModel: ObservableObject {
         defer { if gen == generation { isLoading = false } }
 
         do {
-            let res = try await fetchPage(startFrom: nil, settings: settings)
+            // Первую страницу тянем «сырой», чтобы закэшировать исходный JSON.
+            let raw = try await fetchRaw(startFrom: nil, settings: settings)
             guard gen == generation else { return } // пришёл ответ устаревшего запроса
+            let res: Response = try OVKClient.decode(raw)
             mergeAuthors(res)
             posts = dedup(res.items)
             nextFrom = res.nextFrom
             canLoadMore = !(res.nextFrom ?? "").isEmpty && res.items.count >= pageSize
+            Self.saveCache(raw, kind: kind)
         } catch {
             guard gen == generation, !error.isCancellation else { return }
             // При обновлении не затираем уже показанные посты; ошибку показываем только на пустом экране.
@@ -132,6 +148,11 @@ final class NewsfeedViewModel: ObservableObject {
     // MARK: - Private
 
     private func fetchPage(startFrom: String?, settings: AppSettings) async throws -> Response {
+        try OVKClient.decode(try await fetchRaw(startFrom: startFrom, settings: settings))
+    }
+
+    /// Сырое тело страницы ленты (для кэша первой страницы и обычной подгрузки).
+    private func fetchRaw(startFrom: String?, settings: AppSettings) async throws -> Data {
         guard let token = settings.token else { throw OVKError.notAuthorized }
         let client = OVKClient(
             instance: settings.instance,
@@ -145,7 +166,40 @@ final class NewsfeedViewModel: ObservableObject {
         if let startFrom, !startFrom.isEmpty {
             params["start_from"] = startFrom
         }
-        return try await client.call(method, params: params)
+        return Data(try await client.rawResponse(method, params: params).utf8)
+    }
+
+    // MARK: - Дисковый кэш первой страницы (лента видна сразу при запуске)
+
+    private static func cacheURL(kind: Kind) -> URL {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent(kind == .my ? "feed_cache_my.json" : "feed_cache_global.json")
+    }
+
+    private static func saveCache(_ raw: Data, kind: Kind) {
+        try? raw.write(to: cacheURL(kind: kind), options: .atomic)
+    }
+
+    private static func loadCache(kind: Kind) -> Data? {
+        try? Data(contentsOf: cacheURL(kind: kind))
+    }
+
+    /// Стирает кэш ленты (при выходе из аккаунта).
+    static func clearCache() {
+        try? FileManager.default.removeItem(at: cacheURL(kind: .my))
+        try? FileManager.default.removeItem(at: cacheURL(kind: .global))
+    }
+
+    /// Фоновое обновление «моей ленты» (BGAppRefresh): тихо тянет первую страницу и кладёт
+    /// в кэш, чтобы при следующем запуске пользователь сразу увидел почти свежие посты.
+    static func prefetchForBackground(settings: AppSettings) async {
+        guard let token = settings.token else { return }
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        if let raw = try? await client.rawResponse("newsfeed.get", params: ["count": "25", "extended": "1"]) {
+            // Кэшируем только валидный ответ (с "response"), не ошибку.
+            let data = Data(raw.utf8)
+            if let _: Response = try? OVKClient.decode(data) { saveCache(data, kind: .my) }
+        }
     }
 
     private func mergeAuthors(_ res: Response) {
