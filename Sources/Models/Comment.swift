@@ -52,7 +52,9 @@ struct Comment: Decodable, Identifiable, Hashable {
         commentID = (try? c.decode(Int.self, forKey: .commentID)) ?? 0
         fromID    = (try? c.decode(Int.self, forKey: .fromID)) ?? 0
         date      = (try? c.decode(Int.self, forKey: .date)) ?? 0
-        text      = (try? c.decode(String.self, forKey: .text)) ?? ""
+        // decodingHTMLEntities: сервер отдаёт текст пропущенным через htmlspecialchars
+        // (см. TRichText::getText) — без раскодирования "<"/">"/"&" показывались бы как есть.
+        text      = ((try? c.decode(String.self, forKey: .text)) ?? "").decodingHTMLEntities
         canDelete = ((try? c.decode(Int.self, forKey: .canDelete)) ?? 0) == 1
 
         if let likes = try? c.nestedContainer(keyedBy: LikesKeys.self, forKey: .likes) {
@@ -81,12 +83,27 @@ struct Comment: Decodable, Identifiable, Hashable {
     }
 }
 
-/// Ответ wall.getComments (extended=1): комментарии + профили авторов.
-/// groups сервер сейчас НЕ присылает (club id кладёт в profiles, где ищутся юзеры) —
-/// поле оставлено на будущее, а имена групп дозапрашиваются отдельно (groups.getById).
+/// Ответ wall.getComments (extended=1): комментарии + профили авторов (+ группы-авторы).
+///
+/// `groups` декодируем ТЕРПИМО (`try?`): сервер до коммита 52a8961 групп не присылал вовсе,
+/// а ПОСЛЕ него присылает, но с багом — `Wall::getComments` зовёт `Groups::get(user_id!)`
+/// вместо getById, и при наличии коммента от группы поле приходит ОБЪЕКТОМ {count, items}
+/// с ЧУЖИМИ данными (клубы юзера, чей id совпал с первым club id). Строгий декод ронял бы
+/// ВЕСЬ ответ → комментарии не открылись бы. Не распарсилось/мусор → nil, имена групп
+/// дозапросит loadGroupAuthors (groups.getById), как и раньше.
 struct CommentsResponse: Decodable {
     let count: Int?
     let items: [Comment]
     let profiles: [User]?
     let groups: [Community]?
+
+    private enum CodingKeys: String, CodingKey { case count, items, profiles, groups }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = try? c.decode(Int.self, forKey: .count)
+        items = try c.decode([Comment].self, forKey: .items)
+        profiles = try? c.decode([User].self, forKey: .profiles)
+        groups = try? c.decode([Community].self, forKey: .groups)
+    }
 }

@@ -58,10 +58,14 @@ struct PhotosView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 2) {
                         ForEach(Array(model.photos.enumerated()), id: \.element.id) { i, photo in
-                            // Гарантированно квадратная ячейка 1:1.
+                            // Гарантированно квадратная ячейка 1:1. Картинке хит не нужен:
+                            // .clipped() не режет хит-тест, и «хвост» .fill крал бы тапы соседей.
                             Color.clear
                                 .aspectRatio(1, contentMode: .fit)
-                                .overlay(CachedImage(url: photo.thumbURL) { OVK.Palette.background })
+                                .overlay(
+                                    CachedImage(url: photo.thumbURL) { OVK.Palette.background }
+                                        .allowsHitTesting(false)
+                                )
                                 .clipped()
                                 .photoHeroSource(photos: model.photos, index: i, post: nil, coordinator: photoHero)
                         }

@@ -29,6 +29,22 @@ final class LibraryManager: ObservableObject {
         return album.bookmarked
     }
 
+    /// Разово подтягивает серверный список моих плейлистов, чтобы isBookmarked был верен
+    /// даже когда сам Album пришёл без флага bookmarked (audio.getPlaylistById его не отдаёт —
+    /// открытие плейлиста по ссылке иначе всегда показывало «не в плейлистах»).
+    private var bookmarksHydrated = false
+    func hydrateBookmarks(settings: AppSettings) async {
+        guard !bookmarksHydrated, let token = settings.token else { return }
+        bookmarksHydrated = true
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        guard let res: ItemsResponse<Album> = try? await client.call(
+            "audio.getPlaylists", params: ["owner_id": "0", "count": "100"]
+        ) else { bookmarksHydrated = false; return } // не вышло — попробуем в следующий раз
+        for album in res.items where album.bookmarked {
+            if !unbookmarkedAlbums.contains(album.id) { bookmarkedAlbums.insert(album.id) }
+        }
+    }
+
     // MARK: - Действия
 
     func toggleTrack(_ track: Audio, settings: AppSettings) {

@@ -1,39 +1,106 @@
 import SwiftUI
 
-/// Перехват ссылок OpenVK: внутренние открываются в приложении (своим sheet на КАЖДОМ уровне,
-/// поэтому работает и внутри уже открытых по ссылке экранов), остальные — системно.
+/// Перехват ссылок OpenVK: внутренние открываются в приложении ПУШЕМ в ОКРУЖАЮЩИЙ
+/// NavigationView (как в VK — новая страница выезжает справа, свайп-назад работает,
+/// таб-бар остаётся). Самодостаточный (свой `LinkRouter` + фоновый `NavigationLink`).
+///
+/// Где применяется:
+/// • на каждый МОДАЛЬНЫЙ корень с кликабельным контентом (sheet — SwiftUI не проносит
+///   `openURL` через границу модалки; пуш идёт в NavigationView самой модалки);
+/// • РЕКУРСИВНО на экран, открытый по ссылке (`GlobalLinkPush` навешивает его на
+///   `LinkDestinationView`) — чтобы ссылки в цепочке пушились дальше в тот же стек.
+/// Глобальный перехват в ОСНОВНЫХ вкладках — НЕ через этот модификатор, а через общий
+/// роутер + `.pushesGlobalLinks(tab:)` (см. `MainTabView`), т.к. пушить надо в стек
+/// КОНКРЕТНОЙ активной вкладки, а её NavigationView лежит НИЖЕ глобального override.
 private struct OVKLinkHandler: ViewModifier {
     @StateObject private var router = LinkRouter()
     func body(content: Content) -> some View {
         content
             .environment(\.openURL, OpenURLAction { router.open($0) ? .handled : .systemAction })
-            .sheet(item: $router.destination) { destination in
-                LinkDestinationView(destination: destination)
-            }
+            .background(
+                NavigationLink(
+                    isActive: Binding(
+                        get: { router.destination != nil },
+                        set: { if !$0 { router.destination = nil } }
+                    )
+                ) {
+                    if let dest = router.destination {
+                        LinkDestinationView(destination: dest).handlesOVKLinks()
+                    }
+                } label: { EmptyView() }
+                .hidden()
+            )
     }
 }
 
+/// Пушит назначение глобального роутера в стек КОНКРЕТНОЙ вкладки. Навешивается ВНУТРИ
+/// NavigationView каждой вкладки. Пушит, только если ссылку тапнули на ЭТОЙ вкладке
+/// (`targetTab` зафиксирован в момент тапа) — переключение вкладок не роняет открытый экран.
+private struct GlobalLinkPush: ViewModifier {
+    let tab: Int
+    @EnvironmentObject private var router: LinkRouter
+    func body(content: Content) -> some View {
+        content
+            .background(
+                NavigationLink(
+                    isActive: Binding(
+                        get: { router.targetTab == tab && router.destination != nil },
+                        set: { active in
+                            if !active, router.targetTab == tab { router.destination = nil; router.targetTab = nil }
+                        }
+                    )
+                ) {
+                    if let dest = router.destination {
+                        LinkDestinationView(destination: dest).handlesOVKLinks() // рекурсия внутри
+                    }
+                } label: { EmptyView() }
+                .hidden()
+            )
+            // Повторный тап по активной вкладке → pop-to-root её стека (см. MainTabView.tabButton).
+            .background(NavigationPopper(trigger: router.resetTrigger[tab, default: 0]))
+    }
+}
+
+/// Программный pop-to-root для NavigationView (iOS 15 не даёт этого штатно, а смена .id()
+/// пересоздаёт весь раздел = видимая перезагрузка). Пустой VC живёт в стеке вкладки; при
+/// инкременте `trigger` он зовёт popToRootViewController(animated:) — ощущается как свайп-назад.
+private struct NavigationPopper: UIViewControllerRepresentable {
+    let trigger: Int
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        context.coordinator.lastTrigger = trigger
+        return UIViewController()
+    }
+
+    func updateUIViewController(_ vc: UIViewController, context: Context) {
+        guard context.coordinator.lastTrigger != trigger else { return }
+        context.coordinator.lastTrigger = trigger
+        // На след. runloop: к этому моменту стек смонтирован и nav-контроллер доступен.
+        DispatchQueue.main.async { vc.navigationController?.popToRootViewController(animated: true) }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    final class Coordinator { var lastTrigger = 0 }
+}
+
 extension View {
-    /// Включает открытие ссылок OpenVK внутри приложения для этого поддерева.
+    /// Открытие ссылок OpenVK ПУШЕМ в окружающий NavigationView. На модальных корнях
+    /// и рекурсивно на открытом по ссылке экране (НЕ на основных вкладках).
     func handlesOVKLinks() -> some View { modifier(OVKLinkHandler()) }
+
+    /// Пуш назначения ГЛОБАЛЬНОГО роутера в стек этой вкладки. Внутри NavigationView вкладки.
+    func pushesGlobalLinks(tab: Int) -> some View { modifier(GlobalLinkPush(tab: tab)) }
 }
 
 /// Экран, открываемый по внутренней ссылке (плейлист / профиль / сообщество / тема).
+/// Сам НЕ заворачивается в NavigationView и НЕ показывает кнопку «Закрыть» —
+/// его пушит `.handlesOVKLinks()` внутри NavigationView активной вкладки,
+/// поэтому ссылки внутри него продолжают пушиться в тот же стек.
 struct LinkDestinationView: View {
     let destination: LinkDestination
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationView {
-            content
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Закрыть") { dismiss() }
-                    }
-                }
-        }
-        .navigationViewStyle(.stack)
-        .handlesOVKLinks() // ссылки внутри этого экрана тоже открываются в приложении
+        content
     }
 
     @ViewBuilder
@@ -48,6 +115,13 @@ struct LinkDestinationView: View {
         case .topic(let groupID, let virtualID):
             // Из ссылки virtual_id известен точно — передаём его как guess без резолва.
             TopicView(groupID: groupID, topicDBID: nil, virtualIDGuess: virtualID, title: "Обсуждение")
+        case .post(let ownerID, let postID):
+            // Стена: открываем пост с комментариями (PostRow переиспользуется внутри).
+            CommentsView(ownerID: ownerID, postID: postID, fallbackIDs: [], post: nil)
+        case .photo(let ownerID, let photoID):
+            PhotoLinkLoader(ownerID: ownerID, photoID: photoID)
+        case .video(let ownerID, let videoID):
+            VideoLinkLoader(ownerID: ownerID, videoID: videoID)
         case .screenName(let name):
             ScreenNameLinkLoader(name: name)
         }
@@ -146,6 +220,94 @@ private struct CommunityLinkLoader: View {
                 params: ["group_id": String(groupID), "fields": "description,members_count,photo_200,photo_100,is_admin,is_member"]
             )
             if let first = items.first { community = first } else { failed = true }
+        } catch {
+            failed = true
+        }
+    }
+}
+
+/// Загружает фото по owner_id+id (photos.getById) и показывает его на весь экран.
+private struct PhotoLinkLoader: View {
+    let ownerID: Int
+    let photoID: Int
+    @EnvironmentObject private var settings: AppSettings
+    @State private var photo: Photo?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let photo {
+                PhotoViewer(photo: photo)
+            } else if failed {
+                Text("Фото не найдено").foregroundColor(OVK.Palette.textSecondary)
+            } else {
+                ProgressView()
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard let token = settings.token else { failed = true; return }
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        do {
+            let items: [Photo] = try await client.call(
+                "photos.getById",
+                params: ["photos": "\(ownerID)_\(photoID)"]
+            )
+            if let first = items.first { photo = first } else { failed = true }
+        } catch {
+            failed = true
+        }
+    }
+}
+
+/// Фото на весь экран из загруженной модели Photo (чёрный фон, тап/крестик — закрыть).
+private struct PhotoViewer: View {
+    let photo: Photo
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let url = photo.bestURL {
+                CachedImage(url: url, contentMode: .fit, maxPixelSize: 2048) {
+                    ProgressView().tint(.white)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
+/// Загружает видео по owner_id+id (video.get) и открывает плеер.
+private struct VideoLinkLoader: View {
+    let ownerID: Int
+    let videoID: Int
+    @EnvironmentObject private var settings: AppSettings
+    @State private var video: Video?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let video {
+                VideoPlayerScreen(video: video)
+            } else if failed {
+                Text("Видео не найдено").foregroundColor(OVK.Palette.textSecondary)
+            } else {
+                ProgressView()
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard let token = settings.token else { failed = true; return }
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        do {
+            let items: [Video] = try await client.call(
+                "video.get",
+                params: ["videos": "\(ownerID)_\(videoID)"]
+            )
+            if let first = items.first { video = first } else { failed = true }
         } catch {
             failed = true
         }

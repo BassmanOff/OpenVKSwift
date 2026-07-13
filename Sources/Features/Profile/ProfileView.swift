@@ -7,14 +7,26 @@ struct ProfileView: View {
     var userID: Int? = nil
 
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var photoHero: PhotoHeroCoordinator
     @StateObject private var model = ProfileViewModel()
-    @StateObject private var wall = WallViewModel()
+    @StateObject private var wall = WallViewModel(ownerID: 0)
 
     private enum CounterRoute: Hashable { case friends, photos, audios, videos, groups }
     @State private var route: CounterRoute?
     @State private var showCompose = false
     @State private var showSettings = false
-    @State private var showAvatar = false
+    @State private var showEditProfile = false
+    @State private var openChatPeerID: Int?
+    /// Точка на шестерёнке — есть новый тег на GitHub (см. UpdateChecker). Проверяется тут,
+    /// а не только при заходе в «Настройки», чтобы бейдж был виден СРАЗУ, без захода внутрь.
+    @State private var updateAvailable = false
+    @State private var showAllInfo = false
+    /// Смена фото профиля: «...» в просмотрщике аватарки → выбор источника → пикер.
+    @State private var showAvatarSourceDialog = false
+    @State private var showCameraPicker = false
+    @State private var showLibraryPicker = false
+    @State private var avatarUploadError: String?
 
     private var isOwn: Bool { userID == nil }
     /// Что передать в users.get (0 = текущий пользователь).
@@ -22,13 +34,16 @@ struct ProfileView: View {
     /// Конкретный id пользователя (для стены/счётчиков). Берём из загруженного профиля —
     /// он надёжнее settings.userID (который мог потеряться при переустановке).
     private var ownerID: Int { model.user?.id ?? userID ?? settings.userID ?? 0 }
+    /// Трек, который сейчас слушает владелец профиля — всегда с сервера (users.get →
+    /// status_audio), а не из локального плеера: музыка может играть на другом устройстве.
+    private var currentTrack: Audio? { model.user?.statusAudio }
 
     var body: some View {
         if isOwn {
-            NavigationView { profileBody }
+            NavigationView { profileBody.pushesGlobalLinks(tab: 4) }
                 .navigationViewStyle(.stack)
         } else {
-            profileBody
+            profileBody.handlesOVKLinks()
         }
     }
 
@@ -37,19 +52,19 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(OVK.Palette.background.ignoresSafeArea())
             .navigationTitle(isOwn ? "Профиль" : (model.user?.fullName ?? "Профиль"))
-            .navigationBarTitleDisplayMode(.inline) // large-title в кастомном таб-баре скачет — фиксируем inline
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 16) {
-                        // Написать на стену (свою или чужую).
                         Button { showCompose = true } label: {
                             Image(systemName: "square.and.pencil")
                         }
                         if isOwn {
                             Menu {
-                                Button {
-                                    showSettings = true
-                                } label: {
+                                Button { showEditProfile = true } label: {
+                                    Label("Редактировать профиль", systemImage: "pencil")
+                                }
+                                Button { showSettings = true } label: {
                                     Label("Настройки", systemImage: "gearshape")
                                 }
                                 Button(role: .destructive) {
@@ -59,6 +74,14 @@ struct ProfileView: View {
                                 }
                             } label: {
                                 Image(systemName: "gearshape")
+                                    .overlay(alignment: .topTrailing) {
+                                        if updateAvailable {
+                                            Circle()
+                                                .fill(Color.red)
+                                                .frame(width: 8, height: 8)
+                                                .offset(x: 4, y: -2)
+                                        }
+                                    }
                             }
                         }
                     }
@@ -69,30 +92,58 @@ struct ProfileView: View {
                     Task { await wall.reload(ownerID: ownerID, settings: settings) }
                 }
             }
-            .sheet(isPresented: $showSettings) {
-                SettingsView()
+            .sheet(isPresented: $showAllInfo) {
+                if let user = model.user { ProfileAllInfoView(user: user) }
             }
+            .alert("Ошибка", isPresented: Binding(
+                get: { avatarUploadError != nil },
+                set: { if !$0 { avatarUploadError = nil } }
+            )) {
+                Button("ОК", role: .cancel) {}
+            } message: {
+                Text(avatarUploadError ?? "")
+            }
+            // Настройки — обычный пуш в стек (не modal), чтобы переходы по ссылкам внутри
+            // (разработчик и т.п.) не открывались «за» модалкой, а просто пушились дальше.
+            .background(
+                NavigationLink(isActive: $showSettings) {
+                    SettingsView()
+                } label: { EmptyView() }
+                .hidden()
+            )
+            .background(
+                NavigationLink(isActive: $showEditProfile) {
+                    if let user = model.user {
+                        ProfileEditView(user: user) {
+                            Task { await model.load(userID: requestID, settings: settings) }
+                        }
+                    }
+                } label: { EmptyView() }
+                .hidden()
+            )
             .task {
                 await model.loadIfNeeded(userID: requestID, settings: settings)
                 if isOwn, let id = model.user?.id { settings.rememberUserID(id) }
                 await wall.loadIfNeeded(ownerID: ownerID, settings: settings)
             }
+            .task {
+                // Из кэша (см. UpdateChecker), если проверяли < часа назад — сети почти
+                // никогда не бывает при обычном открытии вкладки «Профиль».
+                guard isOwn else { return }
+                let result = await UpdateChecker.check(currentVersion: UpdateChecker.currentVersion, force: false)
+                updateAvailable = result.isUpdateAvailable
+            }
     }
 
     @ViewBuilder
-    private var content: some View {
+    var content: some View {
         if let user = model.user {
             List {
                 card { header(user) }
-                if let counters = user.counters {
-                    card { countersBar(counters) }
-                }
-                if let info = infoCard(user) {
-                    card { info }
-                }
+                if let counters = user.counters { card { countersBar(counters) } }
+                if let info = infoCard(user) { card { info } }
+                if !isOwn { card { actionRow(user) } }
 
-                // Стена
-                sectionLabel("Записи")
                 if wall.posts.isEmpty && !wall.isLoading {
                     card {
                         Text("Записей пока нет")
@@ -106,11 +157,11 @@ struct ProfileView: View {
                                 Task { await wall.delete(p, settings: settings) }
                             }
                         }
-                            .onAppear {
-                                if post.id == wall.posts.last?.id {
-                                    Task { await wall.loadMore(ownerID: ownerID, settings: settings) }
-                                }
+                        .onAppear {
+                            if post.id == wall.posts.last?.id {
+                                Task { await wall.loadMore(ownerID: ownerID, settings: settings) }
                             }
+                        }
                     }
                     if wall.isLoading {
                         ProgressView()
@@ -124,12 +175,22 @@ struct ProfileView: View {
             }
             .listStyle(.plain)
             .background(
-                NavigationLink(
-                    isActive: Binding(get: { route != nil }, set: { if !$0 { route = nil } })
-                ) {
-                    routeDestination
-                } label: { EmptyView() }
-                .hidden()
+                ZStack {
+                    NavigationLink(
+                        isActive: Binding(get: { route != nil }, set: { if !$0 { route = nil } })
+                    ) { routeDestination } label: { EmptyView() }.hidden()
+
+                    NavigationLink(
+                        isActive: Binding(get: { openChatPeerID != nil }, set: { if !$0 { openChatPeerID = nil } })
+                    ) {
+                        if let peerID = openChatPeerID {
+                            ChatView(peerID: peerID,
+                                     title: model.user?.fullName ?? "Диалог",
+                                     avatarURL: model.user?.avatarURL)
+                        }
+                    } label: { EmptyView() }
+                    .hidden()
+                }
             )
             .refreshable {
                 await model.load(userID: requestID, settings: settings)
@@ -150,7 +211,8 @@ struct ProfileView: View {
         }
     }
 
-    /// Обёртка-«карточка»: белый блок во всю ширину + серый зазор снизу (плоский VK-стиль).
+    // MARK: - Карточка
+
     private func card<V: View>(@ViewBuilder _ content: () -> V) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -166,22 +228,22 @@ struct ProfileView: View {
     private func header(_ user: User) -> some View {
         HStack(alignment: .top, spacing: 14) {
             ZStack(alignment: .bottomTrailing) {
-                // Тап по аватару — просмотр в полном размере.
-                Button { showAvatar = true } label: {
-                    CachedImage(url: user.avatarURL) {
-                        ZStack {
-                            OVK.Palette.background
-                            Image(systemName: "person.crop.square")
-                                .font(.system(size: 36))
-                                .foregroundColor(OVK.Palette.textSecondary)
-                        }
+                // Тот же UIKit-просмотрщик, что и у обычных фото (не AvatarViewer):
+                // «...» в нём даёт «Изменить фото профиля» только на своей странице (isOwn).
+                Group {
+                    if let url = user.fullAvatarURL ?? user.avatarURL {
+                        avatarImage(user)
+                            .photoHeroSource(
+                                photos: [.avatar(ownerID: user.id, url: url)],
+                                index: 0,
+                                post: nil,
+                                coordinator: photoHero,
+                                onChangeAvatar: isOwn ? { showAvatarSourceDialog = true } : nil
+                            )
+                    } else {
+                        avatarImage(user)
                     }
-                    .frame(width: 80, height: 80)
-                    .clipped()
-                    .cornerRadius(4)
                 }
-                .buttonStyle(.plain)
-                .disabled(user.avatarURL == nil)
 
                 if user.online {
                     Circle()
@@ -191,17 +253,42 @@ struct ProfileView: View {
                         .offset(x: 3, y: 3)
                 }
             }
-            .fullScreenCover(isPresented: $showAvatar) {
-                AvatarViewer(url: user.fullAvatarURL ?? user.avatarURL)
+            .confirmationDialog("Изменить фото профиля", isPresented: $showAvatarSourceDialog, titleVisibility: .visible) {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("Камера") { showCameraPicker = true }
+                }
+                Button("Медиатека") { showLibraryPicker = true }
+            }
+            .fullScreenCover(isPresented: $showCameraPicker) {
+                CameraPicker { uploadAvatar($0) }.ignoresSafeArea()
+            }
+            .sheet(isPresented: $showLibraryPicker) {
+                PhotoPicker { uploadAvatar($0) }
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(user.fullName)
-                    .font(.title3).fontWeight(.semibold)
-                    .foregroundColor(OVK.Palette.textPrimary)
                 HStack(spacing: 4) {
-                    // Свой профиль онлайн — всегда «с iPhone» (это наш iOS-клиент).
-                    // У чужих берём реальную платформу из last_seen (иконка только для мобильных, как в VK).
+                    Text(user.fullName)
+                        .font(.title3).fontWeight(.semibold)
+                        .foregroundColor(OVK.Palette.textPrimary)
+                    // Пасхалка: разработчик (id21510) — иконка-гаечный ключ вместо галочки;
+                    // остальные верифицированные на сервере — обычная галочка verified.
+                    if user.id == 21510 {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                            .font(.subheadline)
+                            .foregroundColor(OVK.Palette.primary)
+                    } else if user.verified {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.subheadline)
+                            .foregroundColor(OVK.Palette.primary)
+                    }
+                }
+                if user.id == 21510 {
+                    Text("OpenVK iOS Creator")
+                        .font(.caption)
+                        .foregroundColor(OVK.Palette.primary)
+                }
+                HStack(spacing: 4) {
                     if user.online {
                         let platform: User.OnlinePlatform = isOwn ? .iphone : user.onlinePlatform
                         if platform.hasIcon {
@@ -219,11 +306,55 @@ struct ProfileView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
                 }
+                if let track = currentTrack {
+                    Button { player.play(track, in: [track]) } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "music.note")
+                                .font(.caption)
+                                .foregroundColor(OVK.Palette.primary)
+                            Text("Слушает: \(track.artist) — \(track.title)")
+                                .font(.subheadline)
+                                .foregroundColor(OVK.Palette.textPrimary)
+                                .lineLimit(1)
+                        }
+                        .padding(.top, 2)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
             Spacer(minLength: 0)
         }
         .padding()
+    }
+
+    private func avatarImage(_ user: User) -> some View {
+        CachedImage(url: user.avatarURL) {
+            ZStack {
+                OVK.Palette.background
+                Image(systemName: "person.crop.square")
+                    .font(.system(size: 36))
+                    .foregroundColor(OVK.Palette.textSecondary)
+            }
+        }
+        .frame(width: 80, height: 80)
+        .clipped()
+        .cornerRadius(4)
+    }
+
+    /// Загружает выбранное/снятое фото как новый аватар и обновляет профиль с сервера.
+    private func uploadAvatar(_ image: UIImage) {
+        guard let token = settings.token, let data = image.jpegData(compressionQuality: 0.85) else { return }
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        Task {
+            do {
+                try await client.uploadOwnerPhoto(jpeg: data)
+                await model.load(userID: requestID, settings: settings) // подтягиваем новый avatarURL
+            } catch {
+                if error.isCancellation { return }
+                avatarUploadError = "Не удалось изменить фото профиля"
+            }
+        }
     }
 
     // MARK: - Счётчики
@@ -246,7 +377,7 @@ struct ProfileView: View {
     }
 
     @ViewBuilder
-    private var routeDestination: some View {
+    var routeDestination: some View {
         switch route {
         case .friends: FriendsView(userID: ownerID)
         case .photos:  PhotosView(ownerID: ownerID)
@@ -257,20 +388,7 @@ struct ProfileView: View {
         }
     }
 
-    /// Серый заголовок-разделитель секции (как «Записи» в VK).
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.footnote).fontWeight(.semibold)
-            .foregroundColor(OVK.Palette.textSecondary)
-            .padding(.horizontal)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .listRowInsets(EdgeInsets())
-            .listRowSeparator(.hidden)
-            .listRowBackground(OVK.Palette.background)
-    }
-
-    private func counterItem(_ label: String, _ value: Int) -> some View {
+    func counterItem(_ label: String, _ value: Int) -> some View {
         VStack(spacing: 2) {
             Text("\(value)")
                 .font(.headline)
@@ -282,19 +400,93 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity)
     }
 
+    // MARK: - Действия (дружба, сообщение, ещё)
+
+    private func actionRow(_ user: User) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                Task { await toggleFriend() }
+            } label: {
+                Text(friendButtonTitle)
+                    .font(.subheadline).fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(friendButtonBackground)
+                    .foregroundColor(friendButtonForeground)
+                    .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+
+            Button { openChatPeerID = user.id } label: {
+                Image(systemName: "envelope")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 36, height: 36)
+                    .background(OVK.Palette.background)
+                    .foregroundColor(OVK.Palette.textPrimary)
+                    .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+
+            Button { } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 36, height: 36)
+                    .background(OVK.Palette.background)
+                    .foregroundColor(OVK.Palette.textPrimary)
+                    .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding()
+    }
+
+    var friendButtonTitle: String {
+        switch model.friendStatus {
+        case 1:  return "Заявка отправлена"
+        case 2:  return "Принять заявку"
+        case 3:  return "В друзьях"
+        default: return "Добавить в друзья"
+        }
+    }
+
+    var friendButtonBackground: Color {
+        model.friendStatus == 3 ? OVK.Palette.background : OVK.Palette.primary
+    }
+
+    var friendButtonForeground: Color {
+        model.friendStatus == 3 ? OVK.Palette.textPrimary : .white
+    }
+
+    func toggleFriend() async {
+        switch model.friendStatus {
+        case 1:
+            await model.removeFriend(settings: settings)
+        case 2:
+            await model.sendFriendRequest(settings: settings, optimisticStatus: 3)
+        case 3:
+            await model.removeFriend(settings: settings)
+        default:
+            await model.sendFriendRequest(settings: settings)
+        }
+    }
+
     // MARK: - Информация
 
-    private func infoCard(_ user: User) -> AnyView? {
+    func infoCard(_ user: User) -> AnyView? {
         let candidates: [(String, String?)] = [
             ("Город", user.cityTitle),
-            ("День рождения", user.bdate),
+            ("День рождения", user.birthdayDisplay),
             ("О себе", user.about),
         ]
         let rows = candidates.compactMap { label, value -> (String, String)? in
             guard let v = value, !v.isEmpty else { return nil }
             return (label, v)
         }
-        guard !rows.isEmpty else { return nil }
+        let hasExtra = !ProfileAllInfoView.rows(for: user).isEmpty
+        // Раньше карточка (и с ней кнопка «Все данные») пряталась целиком, если не было
+        // города/дня рождения/о себе — даже когда есть музыка/интересы/etc. Показываем
+        // карточку, если есть ЛИБО основные поля, ЛИБО доп. поля.
+        guard !rows.isEmpty || hasExtra else { return nil }
 
         return AnyView(
             VStack(alignment: .leading, spacing: 0) {
@@ -322,37 +514,109 @@ struct ProfileView: View {
                         Divider().padding(.leading)
                     }
                 }
+
+                // Доп. поля (музыка/фильмы/интересы/…) — отдельным листом, чтобы не раздувать
+                // карточку профиля тем, что заполняет меньшинство пользователей.
+                if !ProfileAllInfoView.rows(for: user).isEmpty {
+                    Divider().padding(.leading)
+                    Button { showAllInfo = true } label: {
+                        HStack {
+                            Text("Все данные")
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption)
+                        }
+                        .foregroundColor(OVK.Palette.primary)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle()) // вся строка кликабельна, не только текст/иконка
+                    }
+                    .buttonStyle(.plain)
+                    .font(.subheadline)
+                }
             }
             .padding(.bottom, 8)
         )
     }
+
 }
 
-/// Полноэкранный просмотр аватарки: чёрный фон, картинка целиком, тап/крестик — закрыть.
-/// Используется в профиле и на странице сообщества.
-struct AvatarViewer: View {
-    let url: URL?
+func card<V: View>(@ViewBuilder _ content: () -> V) -> some View {
+    content()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(OVK.Palette.card)
+        .padding(.bottom, 8)
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(OVK.Palette.background)
+}
+
+/// «Все данные»: полный список полей users.get, включая те, что не влезли в основную
+/// карточку профиля (музыка/фильмы/книги/игры/интересы/цитаты/Telegram/дата регистрации/пол).
+/// Сервер отдаёт только заполненные и видимые вызывающему поля — пустые строки уже отфильтрованы.
+struct ProfileAllInfoView: View {
+    let user: User
     @Environment(\.dismiss) private var dismiss
 
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
+    /// Единый источник строк — используется и для показа/скрытия кнопки «Все данные»
+    /// в ProfileView, и для самого листа, чтобы условия не разъезжались.
+    static func rows(for user: User) -> [(String, String)] {
+        let sexText: String? = { switch user.sex { case 1: return "Женский"; case 2: return "Мужской"; default: return nil } }()
+        let regDateText = user.regDate.map { Self.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval($0))) }
 
-            CachedImage(url: url, contentMode: .fit, maxPixelSize: 2048) {
-                ProgressView().tint(.white)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(10)
-                    .background(Circle().fill(Color.black.opacity(0.5)))
-            }
-            .padding()
+        let candidates: [(String, String?)] = [
+            ("Город", user.cityTitle),
+            ("День рождения", user.birthdayDisplay),
+            ("Пол", sexText),
+            ("О себе", user.about),
+            ("Никнейм", user.nickname),
+            ("Короткий адрес", user.screenName),
+            ("Telegram", user.telegram),
+            ("Дата регистрации", regDateText),
+            ("Интересы", user.interests),
+            ("Любимая музыка", user.music),
+            ("Любимые фильмы", user.movies),
+            ("Любимые передачи", user.tv),
+            ("Любимые книги", user.books),
+            ("Любимые игры", user.games),
+            ("Любимые цитаты", user.quotes),
+        ]
+        return candidates.compactMap { label, value in
+            guard let v = value, !v.isEmpty else { return nil }
+            return (label, v)
         }
-        .contentShape(Rectangle())
-        .onTapGesture { dismiss() }
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .long
+        f.locale = Locale(identifier: "ru_RU")
+        return f
+    }()
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(Array(Self.rows(for: user).enumerated()), id: \.offset) { _, row in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.0)
+                            .font(.caption)
+                            .foregroundColor(OVK.Palette.textSecondary)
+                        Text(linkifiedText(row.1))
+                            .font(.subheadline)
+                            .foregroundColor(OVK.Palette.textPrimary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Все данные")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Готово") { dismiss() }
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
     }
 }

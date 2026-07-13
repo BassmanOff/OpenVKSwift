@@ -31,6 +31,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Съёмка фотографии для профиля.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Сохранение фотографий в вашу медиатеку.</string>
 	<key>UIBackgroundModes</key>

@@ -30,6 +30,10 @@ struct AudioListView: View {
                 }
             }
             .navigationTitle("Музыка")
+            .navigationBarTitleDisplayMode(.inline) // единый стиль навбара со всеми вкладками
+            .pushesGlobalLinks(tab: 3) // ссылки из музыки пушатся в стек этой вкладки
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(OVK.Palette.background.ignoresSafeArea())
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),

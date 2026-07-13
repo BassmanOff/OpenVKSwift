@@ -84,7 +84,10 @@ struct AlbumDetailView: View {
                         Text(album.title)
                             .font(.headline)
                             .foregroundColor(OVK.Palette.textPrimary)
-                        Text(album.sizeText)
+                        // Кол-во берём из реально загруженных треков: album.size недостоверен
+                        // при открытии по ссылке (getPlaylistById не отдаёт size → 0).
+                        // ponytail: потолок — 100 (count в audio.get); playlist >100 покажет "100".
+                        Text(Album.sizeText(model.tracks.isEmpty ? album.size : model.tracks.count))
                             .font(.subheadline)
                             .foregroundColor(OVK.Palette.textSecondary)
                         if !album.description.isEmpty {
@@ -133,5 +136,6 @@ struct AlbumDetailView: View {
         }
         .toast($library.toast)
         .task { await model.load(album: album, settings: settings) }
+        .task { await library.hydrateBookmarks(settings: settings) }
     }
 }

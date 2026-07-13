@@ -9,7 +9,7 @@ settings:
   base:
     # ВЕРСИЮ И TEAM ДЕРЖИМ ЗДЕСЬ — иначе xcodegen generate сбрасывает их
     # (проект пересобирается из этого файла, ручные правки в Xcode не сохраняются).
-    MARKETING_VERSION: "0.4.0"
+    MARKETING_VERSION: "0.5.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
@@ -73,7 +73,8 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
-        # фоновое воспроизведение музыки + периодическая фоновая проверка сообщений
+        # фоновое воспроизведение музыки + фоновый режим уведомлений (тихое аудио)
+        # + периодическая фоновая проверка сообщений.
         UIBackgroundModes:
           - audio
           - fetch
@@ -89,5 +90,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         # Для сохранения фото из просмотрщика в «Фото» (только добавление).
         NSPhotoLibraryAddUsageDescription: Сохранение фотографий в вашу медиатеку.
+        # Съёмка новой фотографии профиля.
+        NSCameraUsageDescription: Съёмка фотографии для профиля.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true   # разрешаем HTTP-инстансы (openvk.xyz)

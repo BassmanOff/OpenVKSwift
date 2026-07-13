@@ -16,14 +16,26 @@ struct Message: Codable, Identifiable, Hashable {
         case fromID = "from_id"
     }
 
+    /// Ручное создание — для мгновенной вставки события LongPoll (id у события настоящий,
+    /// серверный; фоновая синхронизация потом сверит поля и дедуплицирует по id).
+    init(id: Int, fromID: Int, date: Int, text: String, isOut: Bool) {
+        self.id = id
+        self.fromID = fromID
+        self.date = date
+        self.text = text
+        self.isOut = isOut
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id     = (try? c.decode(Int.self, forKey: .id)) ?? 0
         fromID = (try? c.decode(Int.self, forKey: .fromID)) ?? 0
         date   = (try? c.decode(Int.self, forKey: .date)) ?? 0
         // Сервер шлёт и text, и body (одинаковые); берём что есть.
-        text   = (try? c.decode(String.self, forKey: .text))
-              ?? (try? c.decode(String.self, forKey: .body)) ?? ""
+        // decodingHTMLEntities: сервер отдаёт текст пропущенным через htmlspecialchars
+        // (см. TRichText::getText) — без раскодирования "<"/">"/"&" показывались бы как есть.
+        text   = ((try? c.decode(String.self, forKey: .text))
+              ?? (try? c.decode(String.self, forKey: .body)) ?? "").decodingHTMLEntities
         isOut  = ((try? c.decode(Int.self, forKey: .out)) ?? 0) == 1
     }
 

@@ -10,6 +10,8 @@ struct Post: Decodable, Identifiable, Hashable {
     let photos: [Photo]
     let audios: [Audio]
     let videos: [Video]
+    /// У поста бывает максимум одно вложение-голосование.
+    let poll: Poll?
     let likesCount: Int
     let userLikes: Bool
     let commentsCount: Int
@@ -56,12 +58,14 @@ struct Post: Decodable, Identifiable, Hashable {
         let photo: Photo?
         let audio: Audio?
         let video: Video?
-        enum CodingKeys: String, CodingKey { case photo, audio, video }
+        let poll: Poll?
+        enum CodingKeys: String, CodingKey { case photo, audio, video, poll }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             photo = try? c.decode(Photo.self, forKey: .photo)
             audio = try? c.decode(Audio.self, forKey: .audio)
             video = try? c.decode(Video.self, forKey: .video)
+            poll = try? c.decode(Poll.self, forKey: .poll)
         }
     }
 
@@ -71,7 +75,9 @@ struct Post: Decodable, Identifiable, Hashable {
         fromID  = (try? c.decode(Int.self, forKey: .fromID)) ?? 0
         ownerID = (try? c.decode(Int.self, forKey: .ownerID)) ?? 0
         date    = (try? c.decode(Int.self, forKey: .date)) ?? 0
-        text    = (try? c.decode(String.self, forKey: .text)) ?? ""
+        // decodingHTMLEntities: сервер отдаёт текст пропущенным через htmlspecialchars
+        // (см. TRichText::getText) — без раскодирования "<"/">"/"&" показывались бы как есть.
+        text    = ((try? c.decode(String.self, forKey: .text)) ?? "").decodingHTMLEntities
 
         if let likes = try? c.nestedContainer(keyedBy: LikesKeys.self, forKey: .likes) {
             likesCount = (try? likes.decode(Int.self, forKey: .count)) ?? 0
@@ -85,14 +91,17 @@ struct Post: Decodable, Identifiable, Hashable {
         var ph: [Photo] = []
         var au: [Audio] = []
         var vi: [Video] = []
+        var pollAtt: Poll?
         if var arr = try? c.nestedUnkeyedContainer(forKey: .attachments) {
             while !arr.isAtEnd {
                 guard let att = try? arr.decode(Attachment.self) else { break }
                 if let p = att.photo { ph.append(p) }
                 if let a = att.audio { au.append(a) }
                 if let v = att.video { vi.append(v) }
+                if let poll = att.poll, pollAtt == nil { pollAtt = poll } // максимум одно голосование на пост
             }
         }
+        poll = pollAtt
         photos = ph
         audios = au
         videos = vi

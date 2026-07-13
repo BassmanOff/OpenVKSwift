@@ -19,9 +19,13 @@ struct Album: Codable, Hashable, Identifiable {
     }
 
     /// «12 треков» с правильным склонением.
-    var sizeText: String {
-        let mod10 = size % 10
-        let mod100 = size % 100
+    var sizeText: String { Self.sizeText(size) }
+
+    /// То же для произвольного числа (напр. реального кол-ва загруженных треков, когда
+    /// поле `size` недостоверно — audio.getPlaylistById его не отдаёт, приходит 0).
+    static func sizeText(_ n: Int) -> String {
+        let mod10 = n % 10
+        let mod100 = n % 100
         let word: String
         if mod10 == 1 && mod100 != 11 {
             word = "трек"
@@ -30,7 +34,7 @@ struct Album: Codable, Hashable, Identifiable {
         } else {
             word = "треков"
         }
-        return "\(size) \(word)"
+        return "\(n) \(word)"
     }
 
     enum CodingKeys: String, CodingKey {

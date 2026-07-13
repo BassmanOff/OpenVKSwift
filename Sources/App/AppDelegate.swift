@@ -14,16 +14,31 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return true
     }
 
-    /// Тап по уведомлению — открываем нужный диалог (peerID лежит в userInfo).
+    /// Тап по уведомлению: сообщение (peerID) → нужный диалог, активность → «Ответы».
     func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                didReceive response: UNNotificationResponse,
-                                withCompletionHandler completionHandler: @escaping () -> Void) {
-        if let peer = response.notification.request.content.userInfo["peerID"] as? Int {
+                                 didReceive response: UNNotificationResponse,
+                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        if let peer = userInfo["peerID"] as? Int {
             Task { @MainActor in
                 NotificationRouter.shared.pendingPeerID = peer
             }
+        } else if userInfo["activity"] != nil {
+            Task { @MainActor in
+                NotificationRouter.shared.pendingActivity = true
+            }
         }
         completionHandler()
+    }
+
+    /// Показ уведомлений, когда приложение активно (в фоне экрана).
+    /// По умолчанию iOS гасит баннер при открытом приложении — явно
+    /// разрешаем баннер + звук (как Telegram/VK). Бейдж на иконке
+    /// обновляется системой независимо от этих опций.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 willPresent notification: UNNotification,
+                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 
     func application(_ application: UIApplication,

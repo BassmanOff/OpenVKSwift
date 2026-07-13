@@ -95,9 +95,17 @@ private final class ImageLoader: ObservableObject {
         }
     }
 
+    nonisolated private static func downsample(data: Data, maxPixelSize: CGFloat) async -> UIImage? {
+        await ImagePipeline.downsample(data: data, maxPixelSize: maxPixelSize)
+    }
+}
+
+/// Общий фоновый конвейер декодирования — им пользуются CachedImage и полноэкранный
+/// просмотрщик (иначе UIImage(data:) декодирует лениво ПРЯМО В КАДРЕ — рывок анимации).
+enum ImagePipeline {
     /// ImageIO-даунсэмплинг: декодирует картинку сразу в нужном размере,
     /// не разворачивая полный битмап оригинала в памяти.
-    nonisolated private static func downsample(data: Data, maxPixelSize: CGFloat) async -> UIImage? {
+    nonisolated static func downsample(data: Data, maxPixelSize: CGFloat) async -> UIImage? {
         guard !Task.isCancelled else { return nil }
         let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions as CFDictionary) else { return nil }

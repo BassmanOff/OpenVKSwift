@@ -48,4 +48,26 @@ struct Photo: Decodable, Identifiable, Hashable {
         ownerID = (try? c.decode(Int.self, forKey: .ownerID)) ?? 0
         sizes   = (try? c.decode([PhotoSize].self, forKey: .sizes)) ?? []
     }
+
+    /// Синтетическое фото аватарки — сервер не отдаёт её отдельным объектом Photo
+    /// (только строкой URL в users.get), а открыть хотим в том же UIKit-просмотрщике,
+    /// что и обычные фото. photoID=0 безопасен: используется только этим одиночным фото.
+    static func avatar(ownerID: Int, url: URL) -> Photo {
+        Photo(photoID: 0, ownerID: ownerID,
+              sizes: [PhotoSize(type: "avatar", url: url.absoluteString, width: nil, height: nil)])
+    }
+
+    /// Синтетическое фото из голой ссылки (картинка-«вложение» в ЛС — API не отдаёт их
+    /// объектом Photo). photoID из хэша URL, чтобы id был уникален (реестр миниатюр
+    /// PhotoHeroCoordinator ключуется по id — одинаковые id склеили бы разные фото).
+    static func remote(url: URL) -> Photo {
+        Photo(photoID: abs(url.absoluteString.hashValue), ownerID: 0,
+              sizes: [PhotoSize(type: "remote", url: url.absoluteString, width: nil, height: nil)])
+    }
+
+    private init(photoID: Int, ownerID: Int, sizes: [PhotoSize]) {
+        self.photoID = photoID
+        self.ownerID = ownerID
+        self.sizes = sizes
+    }
 }
