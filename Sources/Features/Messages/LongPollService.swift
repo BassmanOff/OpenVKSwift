@@ -14,11 +14,14 @@ import Combine
 /// перезагружаем данные обычным API.
 @MainActor
 final class LongPollService: ObservableObject {
-    /// Событие «новое сообщение»: собеседник, id и текст (текст — для уведомлений).
+    /// Событие «новое сообщение»: собеседник, id и текст (текст — для уведомлений и
+    /// МГНОВЕННОЙ вставки в открытый диалог), flags/time — для сборки Message.
     struct LPNewMessage {
         let peerID: Int
         let messageID: Int
         let text: String
+        let flags: Int      // бит 2 = исходящее (наше с другого устройства)
+        let time: Int       // unix-время сообщения (0 = сервер не прислал)
     }
 
     /// Событие «новое сообщение в диалоге с peerID».
@@ -80,11 +83,16 @@ final class LongPollService: ObservableObject {
         task = nil
     }
 
-    /// Лог протокола в консоль Xcode (фильтр: [LongPoll]).
-    private func log(_ message: String) {
+    /// Лог протокола в консоль Xcode (фильтр: [LongPoll]). Миллисекунды — чтобы мерить
+    /// путь «событие → экран» по цепочке [LongPoll]→[ViewModel]→[Snapshot]→[UICollectionView].
+    private static let logTimeFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss"
-        print("[LongPoll] \(f.string(from: Date())) \(message)")
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    private func log(_ message: String) {
+        print("[LongPoll] \(Self.logTimeFormatter.string(from: Date())) \(message)")
     }
 
     // MARK: - Private
@@ -176,9 +184,12 @@ final class LongPollService: ObservableObject {
                             log("  повтор msgId=\(msgID) — игнорируем (эхо сервера)")
                             continue
                         }
-                        log("  → новое сообщение msgId=\(msgID), peer=\(peer)")
+                        log("  → новое сообщение msgId=\(msgID), peer=\(peer) — отправка события")
                         let text = (update.count > 5 ? update[5] as? String : nil) ?? ""
-                        newMessage.send(LPNewMessage(peerID: peer, messageID: msgID, text: text))
+                        let flags = (update.count > 2 ? update[2] as? Int : nil) ?? 0
+                        let time = (update.count > 4 ? update[4] as? Int : nil) ?? 0
+                        newMessage.send(LPNewMessage(peerID: peer, messageID: msgID, text: text,
+                                                     flags: flags, time: time))
                         hadFresh = true
                     }
                 }

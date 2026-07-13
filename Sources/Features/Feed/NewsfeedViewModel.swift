@@ -7,28 +7,19 @@ import SwiftUI
 /// исчезает из иерархии прямо во время pull-to-refresh: спиннер пропадает, мигает
 /// «В ленте пусто», а незавершённый запрос отменяется (та самая ошибка «cancelled»).
 @MainActor
-final class NewsfeedViewModel: ObservableObject {
+final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, Post, NewsfeedViewModel.Kind> {
+
     /// Моя лента (друзья + сообщества) или общая лента всех записей.
     enum Kind: Hashable { case my, global }
 
-    @Published private(set) var posts: [Post] = []
-    @Published private(set) var authors: [Int: WallViewModel.Author] = [:]
-    /// Первая загрузка / pull-to-refresh (центральный спиннер, когда список пуст).
-    @Published private(set) var isLoading = false
-    /// Подгрузка следующей страницы (спиннер-футер внизу списка).
-    @Published private(set) var isLoadingMore = false
-    @Published private(set) var canLoadMore = true
-    @Published var errorMessage: String?
-    @Published private(set) var kind: Kind = .my
+    override var cacheKey: Kind { kind }
+    override var cursorParamName: String { "start_from" }
 
-    private var nextFrom: String?
-    private let pageSize = 25
-    private var loaded = false
-    /// Растёт при каждом reload/переключении ленты — ответы устаревших запросов отбрасываются.
-    private var generation = 0
+    private(set) var kind: Kind = .my
+    override var pageSize: Int { 25 }
 
     /// Ответ newsfeed.get/getGlobal: посты + профили/группы авторов + курсор следующей страницы.
-    private struct Response: Decodable {
+    struct Response: Decodable {
         let items: [Post]
         let profiles: [User]?
         let groups: [Community]?
@@ -39,82 +30,40 @@ final class NewsfeedViewModel: ObservableObject {
         }
     }
 
-    private var method: String { kind == .my ? "newsfeed.get" : "newsfeed.getGlobal" }
+    override var method: String { kind == .my ? "newsfeed.get" : "newsfeed.getGlobal" }
 
-    func loadIfNeeded(settings: AppSettings) async {
-        guard !loaded else { return }
-        loaded = true
-        await reload(settings: settings)
+    override func params(cursor: String?) -> [String: String] {
+        var p: [String: String] = [:]
+        if let cursor, !cursor.isEmpty { p["start_from"] = cursor }
+        return p
     }
 
-    /// Переключение «Моя лента»/«Все записи». Здесь список очищаем сразу —
-    /// это явное действие пользователя (не жест refresh), старые посты не к месту.
-    func switchTo(_ kind: Kind, settings: AppSettings) async {
-        guard kind != self.kind else { return }
-        self.kind = kind
-        generation += 1
-        posts = []
-        authors = [:]
-        nextFrom = nil
-        canLoadMore = true
-        errorMessage = nil
-        await reload(settings: settings)
-    }
-
-    /// Загружает первую страницу. Старые посты остаются на экране до прихода свежих.
-    func reload(settings: AppSettings) async {
-        generation += 1
-        let gen = generation
-        errorMessage = nil
-        isLoading = true
-        defer { if gen == generation { isLoading = false } }
-
-        do {
-            let res = try await fetchPage(startFrom: nil, settings: settings)
-            guard gen == generation else { return } // пришёл ответ устаревшего запроса
-            mergeAuthors(res)
-            posts = dedup(res.items)
-            nextFrom = res.nextFrom
-            canLoadMore = !(res.nextFrom ?? "").isEmpty && res.items.count >= pageSize
-        } catch {
-            guard gen == generation, !error.isCancellation else { return }
-            // При обновлении не затираем уже показанные посты; ошибку показываем только на пустом экране.
-            if posts.isEmpty { errorMessage = error.localizedDescription }
+    override func mergeAuthors(from response: Response) {
+        for u in response.profiles ?? [] {
+            authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
+        }
+        for g in response.groups ?? [] {
+            authors[-g.groupID] = WallViewModel.Author(name: g.name, avatar: g.avatarURL)
         }
     }
 
-    /// Подгрузка следующей страницы (вызывается по появлению последнего поста).
-    func loadMore(settings: AppSettings) async {
-        guard !isLoading, !isLoadingMore, canLoadMore, !posts.isEmpty else { return }
-        let gen = generation
-        isLoadingMore = true
-        defer { if gen == generation { isLoadingMore = false } }
-
-        do {
-            let res = try await fetchPage(startFrom: nextFrom, settings: settings)
-            guard gen == generation else { return }
-            mergeAuthors(res)
-
-            // Дедупликация: сервер может повторять посты между страницами.
-            let existing = Set(posts.map { $0.id })
-            let fresh = res.items.filter { !existing.contains($0.id) }
-            posts += fresh
-
-            // Стоп, если курсор пуст/не сдвинулся, страница неполная или все посты — дубли.
-            let previous = nextFrom
-            nextFrom = res.nextFrom
-            if (res.nextFrom ?? "").isEmpty || res.nextFrom == previous
-                || res.items.count < pageSize || fresh.isEmpty {
-                canLoadMore = false
-            }
-        } catch {
-            guard gen == generation, !error.isCancellation else { return }
-            canLoadMore = false
-            if posts.isEmpty { errorMessage = error.localizedDescription }
-        }
+    override func items(from response: Response) -> [Post] {
+        response.items
     }
 
-    /// Удаляет запись (wall.delete) и убирает её из ленты.
+    override func nextCursor(from response: Response) -> String? {
+        response.nextFrom
+    }
+
+    override func cacheURL(for key: Kind) -> URL {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent(key == .my ? "feed_cache_my.json" : "feed_cache_global.json")
+    }
+
+    // MARK: - Compatibility with view (maps items -> posts)
+
+    var posts: [Post] { items }
+
     func delete(_ post: Post, settings: AppSettings) async {
         guard let token = settings.token else { return }
         let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
@@ -123,43 +72,38 @@ final class NewsfeedViewModel: ObservableObject {
                 "wall.delete",
                 params: ["owner_id": String(post.ownerID), "post_id": String(post.postID)]
             )
-            posts.removeAll { $0.id == post.id }
+            items.removeAll { $0.id == post.id }
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    // MARK: - Private
-
-    private func fetchPage(startFrom: String?, settings: AppSettings) async throws -> Response {
-        guard let token = settings.token else { throw OVKError.notAuthorized }
-        let client = OVKClient(
-            instance: settings.instance,
-            token: token,
-            apiVersion: settings.apiVersion
-        )
-        var params: [String: String] = [
-            "count": String(pageSize),
-            "extended": "1"
-        ]
-        if let startFrom, !startFrom.isEmpty {
-            params["start_from"] = startFrom
-        }
-        return try await client.call(method, params: params)
+    /// Переключение «Моя лента»/«Все записи». Здесь список очищаем сразу —
+    /// это явное действие пользователя (не жест refresh), старые посты не к месту.
+    func switchTo(_ kind: Kind, settings: AppSettings) async {
+        guard kind != self.kind else { return }
+        self.kind = kind
+        await switchKey(kind, settings: settings)
     }
 
-    private func mergeAuthors(_ res: Response) {
-        for u in res.profiles ?? [] {
-            authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
-        }
-        for g in res.groups ?? [] {
-            authors[-g.groupID] = WallViewModel.Author(name: g.name, avatar: g.avatarURL)
-        }
+    /// Стирает кэш ленты (при выходе из аккаунта).
+    static func clearCache() {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.removeItem(at: base.appendingPathComponent("feed_cache_my.json"))
+        try? FileManager.default.removeItem(at: base.appendingPathComponent("feed_cache_global.json"))
     }
 
-    /// Дедуп внутри одной страницы (повторяющиеся id ломают identity в ForEach).
-    private func dedup(_ items: [Post]) -> [Post] {
-        var seen = Set<String>()
-        return items.filter { seen.insert($0.id).inserted }
+    /// Фоновое обновление «моей ленты» (BGAppRefresh): тихо тянет первую страницу и кладёт
+    /// в кэш, чтобы при следующем запуске пользователь сразу увидел почти свежие посты.
+    func prefetchForBackground(settings: AppSettings) async {
+        guard let token = settings.token else { return }
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        if let raw = try? await client.rawResponse("newsfeed.get", params: ["count": "25", "extended": "1"]) {
+            // Кэшируем только валидный ответ (с "response"), не ошибку.
+            let data = Data(raw.utf8)
+            if let _: Response = try? OVKClient.decode(data) {
+                saveCache(data)
+            }
+        }
     }
 }

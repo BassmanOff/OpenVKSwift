@@ -11,6 +11,12 @@ struct MiniPlayerView: View {
                 MiniProgressBar(clock: player.clock)
 
                 HStack(spacing: 16) {
+                    Button { player.stop() } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+
                     VStack(alignment: .leading, spacing: 2) {
                         Text(track.title).font(.subheadline).lineLimit(1)
                         Text(track.artist)

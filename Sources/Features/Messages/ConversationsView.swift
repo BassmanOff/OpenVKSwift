@@ -1,9 +1,13 @@
 import SwiftUI
+import UIKit
+import UserNotifications
 
 /// Список диалогов (messages.getConversations). Чаты OpenVK не поддерживает — только 1-на-1.
 @MainActor
 final class ConversationsViewModel: ObservableObject {
-    @Published private(set) var conversations: [Conversation] = []
+    @Published private(set) var conversations: [Conversation] = [] {
+        didSet { updateAppBadge() }
+    }
     @Published private(set) var authors: [Int: WallViewModel.Author] = [:]
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
@@ -26,9 +30,13 @@ final class ConversationsViewModel: ObservableObject {
     // просмотренного сообщения (UserDefaults).
 
     /// Счётчики новых сообщений, накопленные по LongPoll (peerID → число).
-    @Published private(set) var localUnread: [Int: Int] = [:]
+    @Published private(set) var localUnread: [Int: Int] = [:] {
+        didSet { updateAppBadge() }
+    }
     /// Открытый сейчас диалог — его события не считаются непрочитанными.
-    @Published var activePeerID: Int?
+    @Published var activePeerID: Int? {
+        didSet { updateAppBadge() }
+    }
     /// id последнего просмотренного сообщения по диалогам (живёт между запусками).
     private var seenLastID: [Int: Int]
     private static let seenKey = "msg_seen_last_ids"
@@ -69,6 +77,38 @@ final class ConversationsViewModel: ObservableObject {
     /// Число диалогов с непрочитанными — для бейджа на вкладке.
     var unreadDialogsCount: Int {
         conversations.filter { hasUnread($0) }.count
+    }
+
+    /// Число непрочитанных СООБЩЕНИЙ — для бейджа на иконке приложения.
+    /// Локальный счётчик (по LongPoll) точный; там где есть только серверный флаг —
+    /// считаем ≤1 (сервер знает лишь про последнее сообщение).
+    var unreadMessagesCount: Int {
+        conversations.reduce(0) { sum, convo in
+            guard convo.peerID != activePeerID else { return sum }
+            if let n = localUnread[convo.peerID], n > 0 { return sum + n }
+            if let last = convo.lastMessage, !last.isOut, convo.unreadCount > 0,
+               last.id > (seenLastID[convo.peerID] ?? 0) {
+                return sum + convo.unreadCount
+            }
+            return sum
+        }
+    }
+
+    /// Обновляет бейдж на иконке приложения (число непрочитанных сообщений).
+    private func updateAppBadge() {
+        let count = unreadMessagesCount
+        if #available(iOS 16.0, *) {
+            UNUserNotificationCenter.current().setBadgeCount(count)
+        } else {
+            Self.setLegacyBadge(count)
+        }
+    }
+
+    /// iOS 15: applicationIconBadgeNumber (устарел с iOS 17). Помечаем функцию deprecated,
+    /// чтобы использование устаревшего API внутри неё не давало предупреждения.
+    @available(iOS, deprecated: 16.0)
+    private static func setLegacyBadge(_ count: Int) {
+        UIApplication.shared.applicationIconBadgeNumber = count
     }
 
     func loadIfNeeded(settings: AppSettings) async {
@@ -163,6 +203,7 @@ struct ConversationsView: View {
                 .background(OVK.Palette.background.ignoresSafeArea())
                 .navigationTitle("Сообщения")
                 .navigationBarTitleDisplayMode(.inline)
+                .pushesGlobalLinks(tab: 1) // ссылки из диалогов пушатся в стек этой вкладки
                 .background(
                     NavigationLink(
                         isActive: Binding(
@@ -178,7 +219,9 @@ struct ConversationsView: View {
                         )
                     ) {
                         if let peerID = openPeerID {
-                            ChatView(peerID: peerID, title: model.authors[peerID]?.name ?? "Диалог")
+                            ChatView(peerID: peerID,
+                                     title: model.authors[peerID]?.name ?? "Диалог",
+                                     avatarURL: model.authors[peerID]?.avatar)
                         }
                     } label: { EmptyView() }
                     .hidden()

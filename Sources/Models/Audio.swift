@@ -19,6 +19,8 @@ struct Audio: Codable, Hashable, Identifiable {
     let added: Bool
     /// Альбом, к которому привязан трек (если есть) — отсюда берём обложку.
     let album: Album?
+    /// id для audio.getLyrics — приходит, только если у трека есть текст на OpenVK.
+    let lyricsID: Int?
 
     /// Обложка трека = обложка его альбома (если трек к нему привязан).
     var coverURL: URL? { album?.coverImageURL }
@@ -56,6 +58,7 @@ struct Audio: Codable, Hashable, Identifiable {
         case ready
         case added
         case album
+        case lyricsID = "lyrics_id"
     }
 
     init(from decoder: Decoder) throws {
@@ -72,6 +75,7 @@ struct Audio: Codable, Hashable, Identifiable {
         ready     = (try? c.decode(Bool.self, forKey: .ready)) ?? true
         added     = (try? c.decode(Bool.self, forKey: .added)) ?? false
         album     = try? c.decode(Album.self, forKey: .album)
+        lyricsID  = try? c.decode(Int.self, forKey: .lyricsID)
     }
 
     /// Декодирует значение, которое может быть строкой или false/числом, как опциональную строку.

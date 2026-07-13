@@ -41,7 +41,7 @@ struct FriendsView: View {
     }
 }
 
-private struct FriendRow: View {
+struct FriendRow: View {
     let user: User
 
     var body: some View {
@@ -75,5 +75,6 @@ private struct FriendRow: View {
             Spacer()
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle()) // весь плитка — тап-цель, а не толькo аватар/текст
     }
 }

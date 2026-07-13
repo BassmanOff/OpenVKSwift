@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Внутренние места назначения, распознаваемые из ссылок OpenVK.
 enum LinkDestination: Identifiable, Hashable {
@@ -8,6 +9,12 @@ enum LinkDestination: Identifiable, Hashable {
     case topic(groupID: Int, virtualID: Int)
     /// Короткий адрес (openvk.org/durov) — резолвится через utils.resolveScreenName.
     case screenName(String)
+    /// Запись на стене (wall{owner}_{post}).
+    case post(ownerID: Int, postID: Int)
+    /// Фотография (photo{owner}_{id}).
+    case photo(ownerID: Int, photoID: Int)
+    /// Видеозапись (video{owner}_{id}).
+    case video(ownerID: Int, videoID: Int)
 
     var id: String {
         switch self {
@@ -16,18 +23,45 @@ enum LinkDestination: Identifiable, Hashable {
         case .community(let g):       return "club\(g)"
         case .topic(let g, let v):    return "topic\(g)_\(v)"
         case .screenName(let s):      return "sn_\(s)"
+        case .post(let o, let p):       return "post\(o)_\(p)"
+        case .photo(let o, let p):     return "photo\(o)_\(p)"
+        case .video(let o, let v):     return "video\(o)_\(v)"
         }
     }
 }
 
-/// Хранит запрошенное из ссылки место назначения (показывается как sheet на верхнем уровне).
+/// Хранит запрошенное из ссылки место назначения. ЕДИНЫЙ `destination` для ВСЕХ типов.
+///
+/// Две роли одного класса:
+/// • ГЛОБАЛЬНЫЙ роутер (один на `MainTabView`): `open(_:activeTab:)` фиксирует ВКЛАДКУ, в чей
+///   стек пушить (в момент тапа), — фоновый `NavigationLink` нужной вкладки пушит назначение,
+///   поэтому таб-бар остаётся, работает свайп-назад (не модалка).
+/// • ЛОКАЛЬНЫЙ роутер (`.handlesOVKLinks()` на модалках и рекурсивно на открытом экране):
+///   `open(_)` без вкладки — пуш в ОКРУЖАЮЩИЙ NavigationView (модалки/цепочки ссылок).
 @MainActor
 final class LinkRouter: ObservableObject {
     @Published var destination: LinkDestination?
+    /// Индекс вкладки, в чей стек пушим (только у глобального роутера; nil = локальный пуш).
+    @Published var targetTab: Int?
+    /// Счётчик «pop-to-root» по индексу вкладки: инкремент = повторный тап по активной вкладке.
+    /// `GlobalLinkPush` внутри вкладки слушает свой ключ и схлопывает стек анимированно.
+    @Published var resetTrigger: [Int: Int] = [:]
 
     /// Возвращает true, если ссылка распознана как внутренняя (и навигация запущена).
-    func open(_ url: URL) -> Bool {
+    @discardableResult
+    func open(_ url: URL, activeTab: Int? = nil) -> Bool {
+        // away.php?to=<url> — OpenVK-шный трекер-редирект внешних ссылок.
+        // Вытаскиваем целевой URL и открываем его системно (браузер), не в приложении.
+        if let host = url.host?.lowercased(), LinkParser.hosts.contains(host),
+           url.path.contains("away.php"),
+           let q = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let to = q.queryItems?.first(where: { $0.name == "to" })?.value,
+           let toURL = URL(string: to) {
+            UIApplication.shared.open(toURL)
+            return true
+        }
         guard let dest = LinkParser.parse(url) else { return false }
+        targetTab = activeTab
         destination = dest
         return true
     }
@@ -35,7 +69,7 @@ final class LinkRouter: ObservableObject {
 
 /// Разбирает ссылки OpenVK (openvk.org / openvk.xyz / ovk.to) в места назначения.
 enum LinkParser {
-    private static let hosts: Set<String> = [
+    fileprivate static let hosts: Set<String> = [
         "openvk.org", "www.openvk.org", "m.openvk.org",
         "openvk.xyz", "www.openvk.xyz",
         "ovk.to", "www.ovk.to"
@@ -57,6 +91,16 @@ enum LinkParser {
         }
         if let m = match("^topic(\\d+)_(\\d+)$", path), let g = Int(m[1]), let v = Int(m[2]) {
             return .topic(groupID: g, virtualID: v)
+        }
+        // Записи на стене / фото / видео — в приложение (owner может быть отрицательным).
+        if let m = match("^wall(-?\\d+)_(\\d+)$", path), let o = Int(m[1]), let p = Int(m[2]) {
+            return .post(ownerID: o, postID: p)
+        }
+        if let m = match("^photo(-?\\d+)_(\\d+)$", path), let o = Int(m[1]), let p = Int(m[2]) {
+            return .photo(ownerID: o, photoID: p)
+        }
+        if let m = match("^video(-?\\d+)_(\\d+)$", path), let o = Int(m[1]), let v = Int(m[2]) {
+            return .video(ownerID: o, videoID: v)
         }
         // Короткие адреса (openvk.org/perezaliv) — в приложение через resolveScreenName.
         // Технические пути и медиа-ссылки (audios123, wall1_2, feed...) оставляем браузеру.

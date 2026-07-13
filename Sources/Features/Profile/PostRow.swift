@@ -5,12 +5,16 @@ struct PostRow: View {
     let post: Post
     let authors: [Int: WallViewModel.Author]
     var onDelete: ((Post) -> Void)? = nil
+    /// Отключает интерактивность кнопки комментариев (используется при встраивании PostRow в CommentsView).
+    var commentTapEnabled: Bool = true
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var likes: LikesManager
     @EnvironmentObject private var photoHero: PhotoHeroCoordinator
     @Environment(\.openURL) private var openURL
-    @State private var showComments = false
+    @State private var showCommentsSheet = false
+    @State private var showLikers = false
+    @State private var confirmDelete = false
     /// Оригинал репоста, дозагруженный через wall.getById (в copy_history API кладёт только фото).
     @State private var fullRepost: Post?
 
@@ -27,6 +31,13 @@ struct PostRow: View {
             photosView(post.photos)
             MediaAttachmentsView(audios: post.audios, videos: post.videos)
 
+            if let poll = post.poll {
+                // .id — форс пересоздания при обновлении поста (pull-to-refresh), иначе
+                // @State внутри PollCardView не подхватит новые голоса/результаты с сервера.
+                PollCardView(poll: poll)
+                    .id("\(poll.id)-\(poll.votes)-\(poll.hasVoted)")
+            }
+
             if let repost = post.repost {
                 repostBlock(repost)
             }
@@ -36,11 +47,14 @@ struct PostRow: View {
         .padding()
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { likes.like(post, settings: settings) }
-        .deleteMenu(enabled: post.canDelete && onDelete != nil) {
-            onDelete?(post)
+        .sheet(isPresented: $showCommentsSheet) {
+            CommentsView(ownerID: post.ownerID, postID: post.postID, fallbackIDs: [], post: post)
         }
-        .sheet(isPresented: $showComments) {
-            CommentsView(ownerID: post.ownerID, postID: post.postID)
+        .sheet(isPresented: $showLikers) {
+            LikersView(ownerID: post.ownerID, postID: post.postID)
+        }
+        .confirmationDialog("Удалить запись?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Удалить", role: .destructive) { onDelete?(post) }
         }
         .task { await loadFullRepost() }
     }
@@ -96,6 +110,19 @@ struct PostRow: View {
             }
             .buttonStyle(.plain)
             Spacer()
+            // Крестик удаления (как в старом VK) — только на своих записях.
+            // Явная кнопка вместо долгих тапов/contextMenu: те конфликтовали то с
+            // «сердечком», то со скроллом List (см. историю правок).
+            if post.canDelete && onDelete != nil {
+                Button { confirmDelete = true } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(OVK.Palette.textSecondary)
+                        .padding(8) // зона нажатия побольше самой иконки
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -105,22 +132,32 @@ struct PostRow: View {
     private func photosView(_ photos: [Photo]) -> some View {
         if photos.count == 1, let photo = photos.first {
             // Одно фото — показываем целиком в его пропорциях (без кадрирования).
-            CachedImage(url: photo.bestURL) { OVK.Palette.background }
+            // .clipped() НЕ ограничивает хит-тест: невидимый «хвост» фото перехватывал бы
+            // тапы соседних элементов. Тап ловит оверлей photoHeroSource, картинке хит не нужен.
+            CachedImage(url: photo.bestURL) {
+                // Placeholder с правильным aspectRatio, чтобы не прыгал layout при загрузке
+                OVK.Palette.background
+                    .aspectRatio(photo.aspectRatio ?? 1.4, contentMode: .fit)
+            }
                 .aspectRatio(photo.aspectRatio ?? 1.4, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
                 .cornerRadius(6)
+                .allowsHitTesting(false)
                 .photoHeroSource(photos: photos, index: 0, post: post, coordinator: photoHero)
         } else if !photos.isEmpty {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)], spacing: 2) {
                 ForEach(Array(photos.enumerated()), id: \.element.id) { i, photo in
                     // Размер ячейки задаёт Color.clear, фото — оверлеем с обрезкой.
                     // Так картинка не «распирает» ячейку и не наезжает на соседей.
+                    // .clipped() НЕ ограничивает хит-тест: невидимый «хвост» .fill-картинки
+                    // ложился бы поверх соседних ячеек и «съедал» их тапы.
                     Color.clear
                         .frame(maxWidth: .infinity)
                         .frame(height: 120)
                         .overlay(
                             CachedImage(url: photo.thumbURL, contentMode: .fill) { OVK.Palette.background }
+                                .allowsHitTesting(false)
                         )
                         .clipped()
                         .cornerRadius(4)
@@ -182,17 +219,27 @@ struct PostRow: View {
                     .foregroundColor(likes.isLiked(post) ? .red : OVK.Palette.textSecondary)
             }
             .buttonStyle(.plain)
+            // Долгий тап по «сердечку» — сразу панель «кто оценил» (друзья вперёд).
+            // Не конфликтует с «Удалить»: контекст-меню записи висит на контенте, футер вне его.
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                if likes.count(post) > 0 { showLikers = true }
+            })
 
-            Button { showComments = true } label: {
+            if commentTapEnabled {
+                Button { showCommentsSheet = true } label: {
+                    Label("\(post.commentsCount)", systemImage: "bubble.right")
+                        .foregroundColor(OVK.Palette.textSecondary)
+                }
+                .buttonStyle(.plain)
+            } else {
                 Label("\(post.commentsCount)", systemImage: "bubble.right")
                     .foregroundColor(OVK.Palette.textSecondary)
             }
-            .buttonStyle(.plain)
             Label("\(post.repostsCount)", systemImage: "arrowshape.turn.up.right")
                 .foregroundColor(OVK.Palette.textSecondary)
             Spacer()
         }
-        .font(.caption)
+        .font(.system(size: 15)) // как в PhotoHero (pointSize 16 иконка / 15pt текст)
         .padding(.top, 2)
     }
 
@@ -244,18 +291,3 @@ final class RepostCache {
     }
 }
 
-private extension View {
-    /// Прикрепляет контекст-меню «Удалить» только когда это доступно (иначе пустого меню не будет).
-    @ViewBuilder
-    func deleteMenu(enabled: Bool, action: @escaping () -> Void) -> some View {
-        if enabled {
-            contextMenu {
-                Button(role: .destructive, action: action) {
-                    Label("Удалить запись", systemImage: "trash")
-                }
-            }
-        } else {
-            self
-        }
-    }
-}

@@ -4,12 +4,18 @@ import SwiftUI
 struct GroupView: View {
     let community: Community
     @EnvironmentObject private var settings: AppSettings
-    @StateObject private var wall = WallViewModel()
+    @EnvironmentObject private var photoHero: PhotoHeroCoordinator
+    @StateObject private var wall = WallViewModel(ownerID: 0)
     @StateObject private var detail = GroupDetailViewModel()
 
     private enum Route: Hashable { case members, audio, topics }
     @State private var route: Route?
-    @State private var showAvatar = false
+    @State private var showCompose = false
+    /// Смена аватара сообщества (только для админов): «...» в просмотрщике → выбор источника → пикер.
+    @State private var showAvatarSourceDialog = false
+    @State private var showCameraPicker = false
+    @State private var showLibraryPicker = false
+    @State private var avatarUploadError: String?
 
     private var ownerID: Int { -community.groupID }   // стена сообщества = отрицательный id
     private var info: Community { detail.details ?? community }
@@ -22,7 +28,6 @@ struct GroupView: View {
                 card { descriptionView(desc) }
             }
 
-            sectionLabel("Записи")
             if wall.posts.isEmpty && !wall.isLoading {
                 card {
                     Text("Записей пока нет")
@@ -64,6 +69,29 @@ struct GroupView: View {
         )
         .navigationTitle(community.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if info.isAdmin {
+                    Button { showCompose = true } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showCompose) {
+            NewPostView(ownerID: ownerID, groupName: info.name) {
+                Task { await wall.reload(ownerID: ownerID, settings: settings) }
+            }
+        }
+        .alert("Ошибка", isPresented: Binding(
+            get: { avatarUploadError != nil },
+            set: { if !$0 { avatarUploadError = nil } }
+        )) {
+            Button("ОК", role: .cancel) {}
+        } message: {
+            Text(avatarUploadError ?? "")
+        }
+        .handlesOVKLinks() // без этого ссылки из постов (плейлист и т.п.) пушатся в корень вкладки, а не сюда
         .task {
             await detail.load(community: community, settings: settings)
             await wall.loadIfNeeded(ownerID: ownerID, settings: settings)
@@ -73,17 +101,35 @@ struct GroupView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 14) {
-                // Тап по аватару — просмотр в полном размере.
-                Button { showAvatar = true } label: {
-                    CachedImage(url: info.avatarURL) {
-                        ZStack { OVK.Palette.background; Image(systemName: "person.3").font(.title).foregroundColor(OVK.Palette.textSecondary) }
+                // Тот же UIKit-просмотрщик, что и у постов/аватара профиля: «...» в нём
+                // даёт «Изменить фото сообщества», только если ты админ (info.isAdmin) —
+                // сервер всё равно перепроверит права (canBeModifiedBy) при загрузке.
+                Group {
+                    if let url = info.fullAvatarURL ?? info.avatarURL {
+                        avatarImage
+                            .photoHeroSource(
+                                photos: [.avatar(ownerID: ownerID, url: url)],
+                                index: 0,
+                                post: nil,
+                                coordinator: photoHero,
+                                onChangeAvatar: info.isAdmin ? { showAvatarSourceDialog = true } : nil
+                            )
+                    } else {
+                        avatarImage
                     }
-                    .frame(width: 80, height: 80)
-                    .clipped()
-                    .cornerRadius(4)
                 }
-                .buttonStyle(.plain)
-                .disabled(info.avatarURL == nil)
+                .confirmationDialog("Изменить фото сообщества", isPresented: $showAvatarSourceDialog, titleVisibility: .visible) {
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button("Камера") { showCameraPicker = true }
+                    }
+                    Button("Медиатека") { showLibraryPicker = true }
+                }
+                .fullScreenCover(isPresented: $showCameraPicker) {
+                    CameraPicker { uploadAvatar($0) }.ignoresSafeArea()
+                }
+                .sheet(isPresented: $showLibraryPicker) {
+                    PhotoPicker { uploadAvatar($0) }
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(info.name)
@@ -119,8 +165,29 @@ struct GroupView: View {
             .buttonStyle(.plain)
         }
         .padding()
-        .fullScreenCover(isPresented: $showAvatar) {
-            AvatarViewer(url: info.fullAvatarURL ?? info.avatarURL)
+    }
+
+    private var avatarImage: some View {
+        CachedImage(url: info.avatarURL) {
+            ZStack { OVK.Palette.background; Image(systemName: "person.3").font(.title).foregroundColor(OVK.Palette.textSecondary) }
+        }
+        .frame(width: 80, height: 80)
+        .clipped()
+        .cornerRadius(4)
+    }
+
+    /// Загружает выбранное/снятое фото как новый аватар сообщества и обновляет данные с сервера.
+    private func uploadAvatar(_ image: UIImage) {
+        guard let token = settings.token, let data = image.jpegData(compressionQuality: 0.85) else { return }
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        Task {
+            do {
+                try await client.uploadOwnerPhoto(jpeg: data, ownerID: -community.groupID)
+                await detail.load(community: community, settings: settings) // подтягиваем новый avatarURL
+            } catch {
+                if error.isCancellation { return }
+                avatarUploadError = "Не удалось изменить фото сообщества"
+            }
         }
     }
 

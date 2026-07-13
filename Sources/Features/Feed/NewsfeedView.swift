@@ -4,6 +4,13 @@ import SwiftUI
 struct NewsfeedView: View {
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var model = NewsfeedViewModel()
+    /// «Ответы» — активность (лайки/комменты/упоминания/заявки). ЕДИНЫЙ источник правды
+    /// для бейджа колокольчика И бейджа вкладки «Новости» — владелец MainTabView, чтобы
+    /// оба бейджа читали одно и то же и обновлялись вместе. Экран открывается пушем и
+    /// переиспользует эту же модель.
+    @ObservedObject var activity: ActivityViewModel
+    /// Программное открытие «Ответов» (тап по баннеру активности) + обычный тап по колокольчику.
+    @State private var showActivity = false
 
     var body: some View {
         NavigationView {
@@ -25,7 +32,38 @@ struct NewsfeedView: View {
             .background(OVK.Palette.background.ignoresSafeArea())
             .navigationTitle("Новости")
             .navigationBarTitleDisplayMode(.inline)
+            .pushesGlobalLinks(tab: 0) // ссылки из ленты/«Ответов» пушатся в стек этой вкладки
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(isActive: $showActivity) {
+                        ActivityView(model: activity)
+                    } label: {
+                        Image(systemName: "bell")
+                            .overlay(alignment: .topTrailing) {
+                                let _ = print("[UI] \(debugNow()) колокольчик рисует бейдж unread=\(activity.unreadCount)")
+                                if activity.unreadCount > 0 {
+                                    Text(activity.unreadCount > 99 ? "99+" : "\(activity.unreadCount)")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.red))
+                                        .offset(x: 11, y: -8)
+                                }
+                            }
+                    }
+                }
+            }
             .task { await model.loadIfNeeded(settings: settings) }
+            // Первичная загрузка активности; периодический refresh ведёт MainTabView
+            // (чтобы бейдж вкладки жил независимо от того, открыта ли лента).
+            .task { await activity.loadIfNeeded(settings: settings) }
+            // Тап по баннеру активности — пушим «Ответы» (вкладку переключил MainTabView).
+            .onReceive(NotificationRouter.shared.$pendingActivity) { pending in
+                guard pending else { return }
+                NotificationRouter.shared.pendingActivity = false
+                showActivity = true
+            }
         }
         // Явный stack-стиль: без него NavigationView в кастомном контейнере может
         // выбрать split-раскладку с некорректным позиционированием навбара (iOS 15).
@@ -72,6 +110,7 @@ struct NewsfeedView: View {
                 }
                 .onAppear {
                     if post.id == model.posts.last?.id {
+                        print("[Feed] onAppear last item: \(post.id), loadingMore: \(model.isLoadingMore)")
                         Task { await model.loadMore(settings: settings) }
                     }
                 }

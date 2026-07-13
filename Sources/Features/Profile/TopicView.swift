@@ -15,8 +15,8 @@ final class TopicViewModel: ObservableObject {
     /// БАГ API: Comment::toVkApiStruct пишет from_id = id владельца БЕЗ минуса, поэтому
     /// коммент от имени группы 11307 выглядит как от пользователя 11307. Отличаем по
     /// спискам extended-ответа: у board.getComments клубы приходят отдельно в groups.
-    private var clubIDs: Set<Int> = []
-    private var profileIDs: Set<Int> = []
+    @Published private var clubIDs: Set<Int> = []
+    @Published private var profileIDs: Set<Int> = []
 
     /// Скорректированный id автора коммента (отрицательный для групп).
     func effectiveAuthorID(_ comment: Comment) -> Int {
@@ -76,12 +76,24 @@ final class TopicViewModel: ObservableObject {
     }
 
     /// Дозапрашивает данные групп-авторов одним groups.getById:
-    /// (a) from_id < 0, которых нет в extended-ответе; (b) клубы из extended-ответа —
-    /// board отдаёт их через Club::toVkApiStruct БЕЗ полей фото, аватарки нет.
+    /// (a) from_id < 0, которых нет в extended-ответе;
+    /// (b) клубы из extended-ответа без аватарки (board отдаёт их БЕЗ фото-полей);
+    /// (c) комменты «от имени группы», которые сервер положил в profiles как DELETED-стаб
+    ///     (баг wall.getComments / правки сервера: getOwner() для on-behalf коммента
+    ///     возвращает группу, но код клал её в `profiles` и groups.getById($group->getOwner()->getId()…)
+    ///     для on-behalf комма возвращает 0 профилей → стаб first_name="DELETED").
+    ///     Если clubs.getById вернул группу — переезжаем автора в clubIDs и
+    ///     `effectiveAuthorID` сам подхватит отрицательный id → отрисуется имя группы,
+    ///     а тап пойдёт на club{id} (как в вебе).
     private func loadGroupAuthors(client: OVKClient) async {
         var need = Set(comments.map { $0.fromID }.filter { $0 < 0 }.map { -$0 })
             .filter { authors[-$0] == nil }
         need.formUnion(clubIDs.filter { authors[-$0]?.avatar == nil })
+        // (c) положительные from_id с DELETED-профилем — пробуем резолвнуть как группу.
+        let deletedProfileIDs = Set(comments.map { $0.fromID }.filter { $0 > 0 }
+            .filter { authors[$0]?.name == "DELETED " || authors[$0]?.name == "DELETED" }
+            .filter { !clubIDs.contains($0) })
+        need.formUnion(deletedProfileIDs)
         guard !need.isEmpty else { return }
         let ids = need.map(String.init).joined(separator: ",")
         let clubs: [Community]? = try? await client.call(
@@ -90,6 +102,12 @@ final class TopicViewModel: ObservableObject {
         )
         for g in clubs ?? [] {
             authors[-g.groupID] = WallViewModel.Author(name: g.name, avatar: g.avatarURL)
+            // Если изначально профиль был DELETED-стабом — переводим id в clubIDs,
+            // чтобы effectiveAuthorID вернул отрицательный id (тап → /club{id}).
+            if deletedProfileIDs.contains(g.groupID) {
+                clubIDs.insert(g.groupID)
+                authors.removeValue(forKey: g.groupID)
+            }
         }
     }
 
@@ -205,17 +223,26 @@ struct TopicView: View {
     }
 
     private var inputBar: some View {
-        HStack(spacing: 8) {
-            TextField("Сообщение…", text: $model.text)
-                .textFieldStyle(.roundedBorder)
+        HStack(alignment: .bottom, spacing: 8) {
+            // Как в комментариях — GrowingTextEditor, чтобы длинный текст переносился на
+            // вторую строку, а не скроллился вбок внутри однострочного поля.
+            GrowingTextEditor(text: $model.text, placeholder: "Сообщение…", minHeight: 22, maxHeight: 120)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(OVK.Palette.background)
+                .cornerRadius(18)
                 .focused($inputFocused)
             if model.isSending {
                 ProgressView()
+                    .frame(width: 38, height: 38)
             } else {
                 Button {
                     Task { await model.send(groupID: groupID, topicDBID: topicDBID, virtualIDGuess: virtualIDGuess, settings: settings) }
                 } label: {
-                    Image(systemName: "paperplane.fill").foregroundColor(OVK.Palette.primary)
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(OVK.Palette.primary)
+                        .frame(width: 38, height: 38)
                 }
                 .disabled(!model.canSend)
             }

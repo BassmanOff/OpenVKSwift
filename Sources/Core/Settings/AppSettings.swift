@@ -13,18 +13,26 @@ final class AppSettings: ObservableObject {
     @Published var autoDownloadMyTracks: Bool {
         didSet { defaults.set(autoDownloadMyTracks, forKey: autoDownloadKey) }
     }
-    /// Локальные уведомления о новых сообщениях (выкл по умолчанию — включается в настройках).
+    /// Локальные уведомления о новых сообщениях (ВКЛ по умолчанию).
     @Published var notifyMessages: Bool {
         didSet { defaults.set(notifyMessages, forKey: notifyKey) }
+    }
+    /// Фоновый режим: тихое аудио держит процесс живым → LongPoll не засыпает →
+    /// уведомления приходят мгновенно даже при закрытом приложении, ценой батареи.
+    /// ВЫКЛ по умолчанию.
+    @Published var backgroundKeepAlive: Bool {
+        didSet { defaults.set(backgroundKeepAlive, forKey: keepAliveKey) }
     }
     /// Оптимизация изображений: даунсэмплинг + фоновое декодирование (вкл по умолчанию).
     /// Тумблер в настройках — для сравнения скорости появления картинок.
     @Published var imageOptimization: Bool {
         didSet { defaults.set(imageOptimization, forKey: imageOptKey) }
     }
-    /// Новый видеодвижок без VLC (вкл по умолчанию); выкл — запасной путь через VLC.
-    @Published var nativeVideoEngine: Bool {
-        didSet { defaults.set(nativeVideoEngine, forKey: nativeVideoKey) }
+    /// Кастомные реакции (скрытые zero-width сообщения). ВКЛ по умолчанию. Выключение —
+    /// для отладки: сообщения-реакции показываются как в веб-версии OpenVK (обычный текст
+    /// с исходным содержимым), payload не интерпретируется.
+    @Published var enableCustomReactions: Bool {
+        didSet { defaults.set(enableCustomReactions, forKey: reactionsKey) }
     }
 
     /// Версия API в стиле VK. OpenVK принимает параметр `v`.
@@ -36,8 +44,9 @@ final class AppSettings: ObservableObject {
     private let userIDKey = "user_id"
     private let autoDownloadKey = "auto_download_my_tracks"
     private let notifyKey = "notify_messages"
+    private let keepAliveKey = "background_keep_alive"
     private let imageOptKey = "image_optimization"
-    private let nativeVideoKey = "native_video_engine"
+    private let reactionsKey = "enable_custom_reactions"
 
     init() {
         if let data = defaults.data(forKey: instanceKey),
@@ -49,9 +58,10 @@ final class AppSettings: ObservableObject {
         token = keychain.token
         userID = defaults.object(forKey: userIDKey) as? Int
         autoDownloadMyTracks = defaults.object(forKey: autoDownloadKey) as? Bool ?? true
-        notifyMessages = defaults.object(forKey: notifyKey) as? Bool ?? false
+        notifyMessages = defaults.object(forKey: notifyKey) as? Bool ?? true
+        backgroundKeepAlive = defaults.object(forKey: keepAliveKey) as? Bool ?? false
         imageOptimization = defaults.object(forKey: imageOptKey) as? Bool ?? true
-        nativeVideoEngine = defaults.object(forKey: nativeVideoKey) as? Bool ?? true
+        enableCustomReactions = defaults.object(forKey: reactionsKey) as? Bool ?? true
     }
 
     var isLoggedIn: Bool { token != nil }
@@ -73,6 +83,9 @@ final class AppSettings: ObservableObject {
     func signOut() {
         keychain.token = nil
         defaults.removeObject(forKey: userIDKey)
+        // Watermark'и уведомлений — персональные (другой аккаунт не должен их наследовать).
+        defaults.removeObject(forKey: "activity_notified_date")
+        defaults.removeObject(forKey: "msg_notified_last_ids")
         token = nil
         userID = nil
     }

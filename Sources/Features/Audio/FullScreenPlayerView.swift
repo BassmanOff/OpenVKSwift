@@ -10,6 +10,7 @@ struct FullScreenPlayerView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var showQueue = false
+    @State private var showLyrics = false
     @State private var extraCover: URL?   // обложка из iTunes, если в OpenVK нет
 
     var body: some View {
@@ -55,6 +56,11 @@ struct FullScreenPlayerView: View {
         .sheet(isPresented: $showQueue) {
             QueueView()
         }
+        .sheet(isPresented: $showLyrics) {
+            if let track = player.current {
+                LyricsView(track: track, clock: player.clock) { player.seek(to: $0) }
+            }
+        }
     }
 
     // MARK: - Компоненты
@@ -83,13 +89,22 @@ struct FullScreenPlayerView: View {
 
                 Spacer()
 
-                // Справа — очередь воспроизведения.
-                Button {
-                    showQueue = true
-                } label: {
-                    Image(systemName: "list.bullet")
-                        .font(.title3)
-                        .foregroundColor(OVK.Palette.primary)
+                // Справа — текст песни и очередь воспроизведения.
+                HStack(spacing: 20) {
+                    if player.current != nil {
+                        Button { showLyrics = true } label: {
+                            Image(systemName: "quote.bubble")
+                                .font(.title3)
+                                .foregroundColor(OVK.Palette.primary)
+                        }
+                    }
+                    Button {
+                        showQueue = true
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.title3)
+                            .foregroundColor(OVK.Palette.primary)
+                    }
                 }
                 .padding(.trailing, 20)
             }

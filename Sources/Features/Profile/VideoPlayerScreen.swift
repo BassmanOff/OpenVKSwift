@@ -1,24 +1,9 @@
 import SwiftUI
 import WebKit
 
-/// Точка входа воспроизведения: нативные mp4 — новый движок (AVPlayer, без VLC)
-/// или VLC (тумблер в настройках); внешние (youtube) — веб.
+/// Экран воспроизведения видео: нативные mp4 (в т.ч. MP3-в-MP4) играет VLC со звуком;
+/// внешние (YouTube и т.п.) — во встроенном веб-вью.
 struct VideoPlayerScreen: View {
-    let video: Video
-    @EnvironmentObject private var settings: AppSettings
-
-    var body: some View {
-        if settings.nativeVideoEngine, video.streamURL != nil {
-            NativeVideoScreen(video: video)
-        } else {
-            VLCVideoPlayerScreen(video: video)
-        }
-    }
-}
-
-/// Прежний экран на VLC — оставлен как запасной движок (тумблер в настройках),
-/// пока новый не подтвердится на реальных видео. После подтверждения VLC выпиливается.
-struct VLCVideoPlayerScreen: View {
     let video: Video
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var audioPlayer: AudioPlayer

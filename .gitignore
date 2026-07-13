@@ -10,6 +10,9 @@ build/
 # macOS
 .DS_Store
 
+# Claude Code local config (не в VCS)
+.claude/
+
 # Swift Package Manager
 .build/
 .swiftpm/

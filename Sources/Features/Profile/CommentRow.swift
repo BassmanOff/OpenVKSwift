@@ -14,8 +14,10 @@ struct CommentRow: View {
     var onReply: (() -> Void)? = nil
 
     @EnvironmentObject private var likes: LikesManager
+    @EnvironmentObject private var photoHero: PhotoHeroCoordinator
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.openURL) private var openURL
+    @State private var showLikers = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -43,10 +45,17 @@ struct CommentRow: View {
                         .foregroundColor(OVK.Palette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                ForEach(comment.photos) { photo in
-                    CachedImage(url: photo.bestURL, contentMode: .fit) { OVK.Palette.background }
-                        .frame(maxWidth: 220, maxHeight: 200, alignment: .leading)
-                        .cornerRadius(6)
+                ForEach(Array(comment.photos.enumerated()), id: \.element.id) { i, photo in
+                    // Обёртка с правильным aspectRatio для placeholder'а, чтобы не прыгал layout
+                    ZStack {
+                        OVK.Palette.background
+                            .aspectRatio(photo.aspectRatio ?? 1.4, contentMode: .fit)
+                        CachedImage(url: photo.bestURL, contentMode: .fit) { OVK.Palette.background }
+                    }
+                    .aspectRatio(photo.aspectRatio ?? 1.4, contentMode: .fit)
+                    .frame(maxWidth: 220, maxHeight: 200, alignment: .leading)
+                    .cornerRadius(6)
+                    .photoHeroSource(photos: comment.photos, index: i, post: nil, coordinator: photoHero)
                 }
                 MediaAttachmentsView(audios: comment.audios, videos: comment.videos)
 
@@ -64,6 +73,9 @@ struct CommentRow: View {
                             .foregroundColor(likes.isLiked(comment: comment) ? .red : OVK.Palette.textSecondary)
                     }
                     .buttonStyle(.plain)
+                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                        if likes.count(comment: comment) > 0 { showLikers = true }
+                    })
 
                     if let onReply {
                         Button(action: onReply) {
@@ -80,6 +92,9 @@ struct CommentRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .sheet(isPresented: $showLikers) {
+            LikersView(commentOwnerID: ownerID, commentID: comment.commentID)
+        }
     }
 
     /// Тап по автору: профиль пользователя или страница сообщества (через маршрутизатор ссылок).
