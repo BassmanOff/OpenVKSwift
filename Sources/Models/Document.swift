@@ -3,7 +3,7 @@ import Foundation
 /// Файл (docs.get/docs.search). Формат вложения — doc{owner}_{id}_{accessKey}:
 /// в отличие от photo/audio/video, у документа есть access_key, без него
 /// сервер (parseAttachments, withKey=true) не резолвит вложение.
-struct Document: Decodable, Identifiable, Hashable {
+struct Document: Codable, Identifiable, Hashable {
     let id: Int
     let ownerID: Int
     let title: String

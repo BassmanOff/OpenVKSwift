@@ -3,7 +3,7 @@ import SwiftUI
 /// Черновик голосования, собираемый в композере поста. Само голосование создаётся на
 /// сервере (polls.create) только при публикации поста — не в момент заполнения формы,
 /// иначе отмена поста оставляла бы висящий поll без единого прикрепления.
-struct PollDraft {
+struct PollDraft: Codable {
     var question = ""
     var answers: [String] = ["", ""]
     var isAnonymous = false

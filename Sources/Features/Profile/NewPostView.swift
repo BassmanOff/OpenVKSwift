@@ -11,8 +11,14 @@ struct NewPostView: View {
     var editingPost: Post? = nil
 
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var drafts: PostDraftManager
     @StateObject private var model = NewPostViewModel()
     @Environment(\.dismiss) private var dismiss
+    /// onAppear перезапускается после fullScreenCover (граффити) — восстановление
+    /// из черновика/editingPost должно быть одноразовым, иначе затрёт живой ввод.
+    @State private var didRestore = false
+    /// Успешная публикация: onDisappear не должен пересохранить только что отправленное.
+    @State private var didPublish = false
 
     @State private var showPhotoPicker = false
     @State private var showGraffiti = false
@@ -56,7 +62,29 @@ struct NewPostView: View {
             .navigationTitle(editingPost == nil ? "Новая запись" : "Редактировать запись")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                if let editingPost { model.loadForEdit(editingPost) }
+                defer { didRestore = true }
+                guard !didRestore else { return }
+                if let editingPost {
+                    model.loadForEdit(editingPost)
+                } else if let d = drafts.draft, d.ownerID == ownerID {
+                    // Черновик этой же стены — продолжаем с места закрытия.
+                    model.restore(from: d)
+                    postAsGroup = d.postAsGroup
+                    signed = d.signed
+                }
+            }
+            .onDisappear {
+                // Срабатывает на swipe-down, «Отмену» И на показ граффити
+                // (fullScreenCover снимает вью) — лишнее сохранение того же черновика безвредно.
+                guard editingPost == nil, !didPublish else { return }
+                if model.hasDraftContent {
+                    drafts.save(model.snapshot(ownerID: ownerID, groupName: groupName,
+                                               postAsGroup: postAsGroup, signed: signed))
+                } else if drafts.draft?.ownerID == ownerID {
+                    // Восстановленный черновик сознательно опустошили — стираем.
+                    // Чужой (другой стены) черновик пустым закрытием не трогаем.
+                    drafts.clear()
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -81,6 +109,9 @@ struct NewPostView: View {
                                     )
                                 }
                                 if success {
+                                    didPublish = true
+                                    // Стираем и промежуточные сохранения (граффити-обход).
+                                    if editingPost == nil { drafts.clear() }
                                     onPosted()
                                     dismiss()
                                 }

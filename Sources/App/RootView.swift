@@ -6,6 +6,7 @@ struct RootView: View {
     @EnvironmentObject private var downloads: AudioDownloadManager
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var longPoll: LongPollService
+    @EnvironmentObject private var drafts: PostDraftManager
 
     var body: some View {
         Group {
@@ -39,6 +40,7 @@ struct RootView: View {
                 NewsfeedViewModel.clearCache()
                 ProfileViewModel.clearCache()
                 WallViewModel.clearCache()
+                drafts.clear() // черновик поста — тоже личные данные
             }
         }
     }
