@@ -78,6 +78,20 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
         }
     }
 
+    /// После редактирования — перечитывает одну запись (wall.getById) и подменяет её
+    /// в ленте, без полного reload.
+    func refreshPost(ownerID: Int, postID: Int, settings: AppSettings) async {
+        guard let token = settings.token else { return }
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        do {
+            let res: WallResponse = try await client.call("wall.getById", params: ["posts": "\(ownerID)_\(postID)"])
+            guard let updated = res.items.first, let idx = items.firstIndex(where: { $0.id == updated.id }) else { return }
+            items[idx] = updated
+        } catch {
+            if !error.isCancellation { errorMessage = error.localizedDescription }
+        }
+    }
+
     /// Переключение «Моя лента»/«Все записи». Здесь список очищаем сразу —
     /// это явное действие пользователя (не жест refresh), старые посты не к месту.
     func switchTo(_ kind: Kind, settings: AppSettings) async {

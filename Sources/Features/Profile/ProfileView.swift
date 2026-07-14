@@ -153,9 +153,11 @@ struct ProfileView: View {
                 } else {
                     ForEach(wall.posts) { post in
                         card {
-                            PostRow(post: post, authors: wall.authors) { p in
+                            PostRow(post: post, authors: wall.authors, onDelete: { p in
                                 Task { await wall.delete(p, settings: settings) }
-                            }
+                            }, onEdited: { p in
+                                Task { await wall.refreshPost(ownerID: p.ownerID, postID: p.postID, settings: settings) }
+                            })
                         }
                         .onAppear {
                             if post.id == wall.posts.last?.id {

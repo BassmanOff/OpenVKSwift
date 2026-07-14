@@ -104,9 +104,11 @@ struct NewsfeedView: View {
         List {
             ForEach(model.posts) { post in
                 card {
-                    PostRow(post: post, authors: model.authors) { p in
+                    PostRow(post: post, authors: model.authors, onDelete: { p in
                         Task { await model.delete(p, settings: settings) }
-                    }
+                    }, onEdited: { p in
+                        Task { await model.refreshPost(ownerID: p.ownerID, postID: p.postID, settings: settings) }
+                    })
                 }
                 .onAppear {
                     if post.id == model.posts.last?.id {

@@ -22,6 +22,12 @@ struct Post: Decodable, Identifiable, Hashable {
     let repost: Repost?
     /// Может ли текущий пользователь удалить запись.
     let canDelete: Bool
+    /// Может ли текущий пользователь редактировать запись (свои посты — 7 дней, посты
+    /// сообщества — пока есть права админа, без ограничения по времени).
+    let canEdit: Bool
+    /// Прикреплённые файлы (doc). В основной ленте не отображаются, но нужны при
+    /// редактировании — иначе wall.edit заменит вложения без них (attachments — replace, не merge).
+    let docs: [Document]
 
     var id: String { "\(ownerID)_\(postID)" }
 
@@ -49,6 +55,7 @@ struct Post: Decodable, Identifiable, Hashable {
         case postSource = "post_source"
         case copyHistory = "copy_history"
         case canDelete = "can_delete"
+        case canEdit = "can_edit"
     }
     private enum LikesKeys: String, CodingKey { case count; case userLikes = "user_likes" }
     private enum PostSourceKeys: String, CodingKey { case platform }
@@ -59,13 +66,15 @@ struct Post: Decodable, Identifiable, Hashable {
         let audio: Audio?
         let video: Video?
         let poll: Poll?
-        enum CodingKeys: String, CodingKey { case photo, audio, video, poll }
+        let doc: Document?
+        enum CodingKeys: String, CodingKey { case photo, audio, video, poll, doc }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             photo = try? c.decode(Photo.self, forKey: .photo)
             audio = try? c.decode(Audio.self, forKey: .audio)
             video = try? c.decode(Video.self, forKey: .video)
             poll = try? c.decode(Poll.self, forKey: .poll)
+            doc = try? c.decode(Document.self, forKey: .doc)
         }
     }
 
@@ -91,6 +100,7 @@ struct Post: Decodable, Identifiable, Hashable {
         var ph: [Photo] = []
         var au: [Audio] = []
         var vi: [Video] = []
+        var doc: [Document] = []
         var pollAtt: Poll?
         if var arr = try? c.nestedUnkeyedContainer(forKey: .attachments) {
             while !arr.isAtEnd {
@@ -98,6 +108,7 @@ struct Post: Decodable, Identifiable, Hashable {
                 if let p = att.photo { ph.append(p) }
                 if let a = att.audio { au.append(a) }
                 if let v = att.video { vi.append(v) }
+                if let d = att.doc { doc.append(d) }
                 if let poll = att.poll, pollAtt == nil { pollAtt = poll } // максимум одно голосование на пост
             }
         }
@@ -105,6 +116,7 @@ struct Post: Decodable, Identifiable, Hashable {
         photos = ph
         audios = au
         videos = vi
+        docs = doc
 
         var plat: User.OnlinePlatform = .none
         if let ps = try? c.nestedContainer(keyedBy: PostSourceKeys.self, forKey: .postSource),
@@ -128,6 +140,7 @@ struct Post: Decodable, Identifiable, Hashable {
         }
 
         canDelete = ((try? c.decode(Int.self, forKey: .canDelete)) ?? 0) == 1
+        canEdit = ((try? c.decode(Int.self, forKey: .canEdit)) ?? 0) == 1
     }
 }
 
