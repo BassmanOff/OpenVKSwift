@@ -34,6 +34,27 @@ final class AppSettings: ObservableObject {
     @Published var enableCustomReactions: Bool {
         didSet { defaults.set(enableCustomReactions, forKey: reactionsKey) }
     }
+    /// Показывать ли на значке «Архив» бейдж непрочитанных из архивных диалогов
+    /// (в общий бейдж вкладки/иконки приложения архив НЕ входит — вкл по умолчанию).
+    @Published var countArchivedUnread: Bool {
+        didSet { defaults.set(countArchivedUnread, forKey: archivedUnreadKey) }
+    }
+
+    /// id альбома «_Private(OVK_iOS)», куда дублируются фото из ЛС (у OpenVK нет вложений
+    /// в личных сообщениях — шлём прямой линк на .jpeg из этого альбома). Создаётся при
+    /// первой отправке; ПЕР-АККАУНТНЫЙ — чистится при выходе (чужой id указал бы в чужой альбом).
+    var pmPhotoAlbumID: Int? {
+        get { defaults.object(forKey: pmAlbumKey) as? Int }
+        set {
+            if let newValue { defaults.set(newValue, forKey: pmAlbumKey) }
+            else { defaults.removeObject(forKey: pmAlbumKey) }
+        }
+    }
+    /// Показывали ли предупреждение, что фото из ЛС попадают в общедоступный альбом.
+    var didWarnPMPhoto: Bool {
+        get { defaults.bool(forKey: pmWarnKey) }
+        set { defaults.set(newValue, forKey: pmWarnKey) }
+    }
 
     /// Версия API в стиле VK. OpenVK принимает параметр `v`.
     let apiVersion = "5.131"
@@ -47,6 +68,9 @@ final class AppSettings: ObservableObject {
     private let keepAliveKey = "background_keep_alive"
     private let imageOptKey = "image_optimization"
     private let reactionsKey = "enable_custom_reactions"
+    private let archivedUnreadKey = "count_archived_unread"
+    private let pmAlbumKey = "pm_photo_album_id"
+    private let pmWarnKey = "pm_photo_warned"
 
     init() {
         if let data = defaults.data(forKey: instanceKey),
@@ -62,6 +86,7 @@ final class AppSettings: ObservableObject {
         backgroundKeepAlive = defaults.object(forKey: keepAliveKey) as? Bool ?? false
         imageOptimization = defaults.object(forKey: imageOptKey) as? Bool ?? true
         enableCustomReactions = defaults.object(forKey: reactionsKey) as? Bool ?? true
+        countArchivedUnread = defaults.object(forKey: archivedUnreadKey) as? Bool ?? true
     }
 
     var isLoggedIn: Bool { token != nil }
@@ -86,6 +111,8 @@ final class AppSettings: ObservableObject {
         // Watermark'и уведомлений — персональные (другой аккаунт не должен их наследовать).
         defaults.removeObject(forKey: "activity_notified_date")
         defaults.removeObject(forKey: "msg_notified_last_ids")
+        // id альбома фото-ЛС — пер-аккаунтный (чужой указал бы в чужой альбом).
+        defaults.removeObject(forKey: pmAlbumKey)
         token = nil
         userID = nil
     }

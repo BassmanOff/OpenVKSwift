@@ -41,11 +41,72 @@ final class ConversationsViewModel: ObservableObject {
     private var seenLastID: [Int: Int]
     private static let seenKey = "msg_seen_last_ids"
 
+    // MARK: - Закреплённые / архивные (чисто локально — сервер OpenVK этого не поддерживает:
+    // ни pin/archive метода в Messages API, ни колонки в Correspondence — проверено по исходникам).
+
+    /// Порядок закреплённых диалогов (peerID), верх списка — первый элемент.
+    @Published private(set) var pinnedOrder: [Int] {
+        didSet { UserDefaults.standard.set(pinnedOrder, forKey: Self.pinnedKey) }
+    }
+    /// Архивные диалоги (peerID).
+    @Published private(set) var archived: Set<Int> {
+        didSet { UserDefaults.standard.set(Array(archived), forKey: Self.archivedKey) }
+    }
+    private static let pinnedKey = "msg_pinned_order"
+    private static let archivedKey = "msg_archived_peers"
+
     init() {
         let raw = (UserDefaults.standard.dictionary(forKey: Self.seenKey) as? [String: Int]) ?? [:]
         seenLastID = Dictionary(uniqueKeysWithValues: raw.compactMap { key, value in
             Int(key).map { ($0, value) }
         })
+        pinnedOrder = (UserDefaults.standard.array(forKey: Self.pinnedKey) as? [Int]) ?? []
+        archived = Set((UserDefaults.standard.array(forKey: Self.archivedKey) as? [Int]) ?? [])
+    }
+
+    var pinnedConversations: [Conversation] {
+        pinnedOrder.compactMap { id in conversations.first { $0.peerID == id } }
+    }
+    var unpinnedConversations: [Conversation] {
+        conversations.filter { !pinnedOrder.contains($0.peerID) && !archived.contains($0.peerID) }
+    }
+    var archivedConversations: [Conversation] {
+        conversations.filter { archived.contains($0.peerID) }
+    }
+    /// Непрочитанные в архиве — для бейджа на кнопке «Архив» (в общий счётчик не входит).
+    var archivedUnreadCount: Int {
+        archivedConversations.filter { hasUnread($0) }.count
+    }
+
+    func isPinned(_ peerID: Int) -> Bool { pinnedOrder.contains(peerID) }
+    func isArchived(_ peerID: Int) -> Bool { archived.contains(peerID) }
+
+    func togglePin(_ peerID: Int) {
+        if let idx = pinnedOrder.firstIndex(of: peerID) {
+            pinnedOrder.remove(at: idx)
+        } else {
+            pinnedOrder.append(peerID)
+            archived.remove(peerID) // закреплённое не может быть одновременно в архиве
+        }
+    }
+
+    func toggleArchive(_ peerID: Int) {
+        if archived.contains(peerID) {
+            archived.remove(peerID)
+        } else {
+            archived.insert(peerID)
+            pinnedOrder.removeAll { $0 == peerID }
+        }
+    }
+
+    /// Перестановка закреплённых из нативного edit mode (.onMove). Индексы приходят
+    /// по ВИДИМОМУ списку (pinnedConversations) — он может быть короче pinnedOrder,
+    /// если какой-то диалог не догрузился; недостающих сохраняем хвостом.
+    func movePinned(fromOffsets: IndexSet, toOffset: Int) {
+        var visible = pinnedConversations.map(\.peerID)
+        visible.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        let missing = pinnedOrder.filter { !visible.contains($0) }
+        pinnedOrder = visible + missing
     }
 
     /// Пришло LongPoll-событие о новом сообщении.
@@ -140,11 +201,33 @@ final class ConversationsViewModel: ObservableObject {
             conversations = res.items
             totalCount = res.count
             canLoadMore = conversations.count < (totalCount ?? 0)
+            await ensurePinnedLoaded(settings: settings)
             Self.saveCache(DialogsCache(conversations: conversations, authors: authors))
         } catch {
             if error.isCancellation { return }
             // Оффлайн/ошибка: если есть кэш — молча оставляем его.
             if conversations.isEmpty { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Закреплённый диалог может не попасть в загруженную страницу (пагинация — по свежести,
+    /// а закреплённый мог давно молчать). Догружаем недостающих напрямую по peer_id и
+    /// вклеиваем — иначе они молча пропадали бы из «закреплённых» до случайной догрузки страницы.
+    private func ensurePinnedLoaded(settings: AppSettings) async {
+        let missing = pinnedOrder.filter { id in !conversations.contains { $0.peerID == id } }
+        guard !missing.isEmpty, let token = settings.token else { return }
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        for peerID in missing {
+            guard let res: HistoryResponse = try? await client.call(
+                "messages.getHistory",
+                params: ["peer_id": String(peerID), "count": "1", "extended": "1"]
+            ) else { continue }
+            for u in res.profiles ?? [] {
+                authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
+            }
+            // unreadCount: 0 — закреплённый диалог без данных о непрочитанности лучше
+            // считать прочитанным, чем неверно раздувать бейдж по недостающим данным.
+            conversations.append(Conversation(peerID: peerID, unreadCount: 0, lastMessage: res.items.first))
         }
     }
 
@@ -185,6 +268,8 @@ final class ConversationsViewModel: ObservableObject {
     /// Стирает кэш (при выходе из аккаунта — это личные данные).
     static func clearCache() {
         try? FileManager.default.removeItem(at: cacheURL)
+        UserDefaults.standard.removeObject(forKey: pinnedKey)
+        UserDefaults.standard.removeObject(forKey: archivedKey)
     }
 }
 
@@ -195,6 +280,9 @@ struct ConversationsView: View {
     @EnvironmentObject private var longPoll: LongPollService
     /// Открытый диалог (программная навигация — надёжнее NavigationLink в строках на iOS 15).
     @State private var openPeerID: Int?
+    /// Режим перестановки закреплённых: включается пунктом меню «Изменить порядок»,
+    /// выключается кнопкой «Готово» (нативный edit mode — хендлы только у строк с .onMove).
+    @State private var editMode: EditMode = .inactive
 
     var body: some View {
         NavigationView {
@@ -204,6 +292,35 @@ struct ConversationsView: View {
                 .navigationTitle("Сообщения")
                 .navigationBarTitleDisplayMode(.inline)
                 .pushesGlobalLinks(tab: 1) // ссылки из диалогов пушатся в стек этой вкладки
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        // if внутри ToolbarItem — обязательное место (снаружи требует iOS 16).
+                        if editMode == .active {
+                            Button("Готово") {
+                                withAnimation { editMode = .inactive }
+                            }
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        NavigationLink {
+                            ArchivedConversationsView(model: model)
+                        } label: {
+                            Image(systemName: "archivebox")
+                                .overlay(alignment: .topTrailing) {
+                                    let count = model.archivedUnreadCount
+                                    if settings.countArchivedUnread, count > 0 {
+                                        Text(count > 99 ? "99+" : "\(count)")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 1)
+                                            .background(Capsule().fill(Color.red))
+                                            .offset(x: 10, y: -6)
+                                    }
+                                }
+                        }
+                    }
+                }
                 .background(
                     NavigationLink(
                         isActive: Binding(
@@ -263,7 +380,7 @@ struct ConversationsView: View {
             ProgressView()
         } else if let error = model.errorMessage, model.conversations.isEmpty {
             ErrorRetry(message: error) { Task { await model.load(settings: settings) } }
-        } else if model.conversations.isEmpty {
+        } else if model.pinnedConversations.isEmpty && model.unpinnedConversations.isEmpty {
             VStack(spacing: 8) {
                 Image(systemName: "bubble.left.and.bubble.right")
                     .font(.system(size: 40))
@@ -273,16 +390,24 @@ struct ConversationsView: View {
             }
         } else {
             List {
-                ForEach(model.conversations) { convo in
+                // Закреплённые — обычные строки этого же списка (просто первые),
+                // скроллятся вместе со всем остальным.
+                if !model.pinnedConversations.isEmpty {
+                    PinnedConversationsSection(model: model, onOpen: openChat) {
+                        withAnimation { editMode = .active }
+                    }
+                }
+                ForEach(model.unpinnedConversations) { convo in
                     Button {
                         openChat(peer: convo.peerID)
                     } label: {
                         row(convo)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu { contextMenuItems(for: convo) }
                     .onAppear {
                         // Показалась последняя строка — догружаем следующую страницу.
-                        if convo.id == model.conversations.last?.id {
+                        if convo.id == model.unpinnedConversations.last?.id {
                             Task { await model.loadMore(settings: settings) }
                         }
                     }
@@ -296,6 +421,25 @@ struct ConversationsView: View {
             }
             .listStyle(.plain)
             .refreshable { await model.load(settings: settings) }
+            .environment(\.editMode, $editMode)
+        }
+    }
+
+    /// Общее меню долгого нажатия — закрепить/открепить, в архив/из архива.
+    /// Используется и здесь, и в PinnedConversationsSection (см. её contextMenu).
+    @ViewBuilder
+    private func contextMenuItems(for convo: Conversation) -> some View {
+        Button {
+            model.togglePin(convo.peerID)
+        } label: {
+            Label(model.isPinned(convo.peerID) ? "Открепить" : "Закрепить",
+                  systemImage: model.isPinned(convo.peerID) ? "pin.slash" : "pin")
+        }
+        Button {
+            model.toggleArchive(convo.peerID)
+        } label: {
+            Label(model.isArchived(convo.peerID) ? "Из архива" : "В архив",
+                  systemImage: model.isArchived(convo.peerID) ? "tray.and.arrow.up" : "archivebox")
         }
     }
 
@@ -317,78 +461,11 @@ struct ConversationsView: View {
     }
 
     private func row(_ convo: Conversation) -> some View {
-        let author = model.authors[convo.peerID]
-        return HStack(spacing: 10) {
-            CachedImage(url: author?.avatar) {
-                ZStack { OVK.Palette.background; Image(systemName: "person.crop.square").foregroundColor(OVK.Palette.textSecondary) }
-            }
-            .frame(width: 48, height: 48)
-            .clipped()
-            .cornerRadius(4)
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(author?.name ?? "Диалог")
-                        .font(.subheadline).fontWeight(.semibold)
-                        .foregroundColor(OVK.Palette.textPrimary)
-                        .lineLimit(1)
-                    Spacer()
-                    if let last = convo.lastMessage {
-                        Text(Self.dateText(last.date))
-                            .font(.caption2)
-                            .foregroundColor(OVK.Palette.textSecondary)
-                    }
-                }
-                HStack(spacing: 6) {
-                    if let last = convo.lastMessage {
-                        Text((last.isOut ? "Вы: " : "") + last.text)
-                            .font(.footnote)
-                            .foregroundColor(OVK.Palette.textSecondary)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                    // Точное число знаем только из LongPoll (сервер отдаёт максимум «1»,
-                    // проверяя лишь последнее сообщение) — иначе показываем точку.
-                    if model.hasUnread(convo) {
-                        let count = model.localUnread[convo.peerID] ?? 0
-                        if count > 0 {
-                            Text("\(count)")
-                                .font(.caption2).fontWeight(.semibold)
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(OVK.Palette.primary))
-                        } else {
-                            Circle()
-                                .fill(OVK.Palette.primary)
-                                .frame(width: 9, height: 9)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
-
-    // DateFormatter дорог в создании — держим статически (вызывается в каждой строке).
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ru_RU")
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ru_RU")
-        f.dateFormat = "d MMM"
-        return f
-    }()
-
-    private static func dateText(_ timestamp: Int) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return Calendar.current.isDateInToday(date)
-            ? timeFormatter.string(from: date)
-            : dayFormatter.string(from: date)
+        ConversationRow(
+            convo: convo,
+            author: model.authors[convo.peerID],
+            isUnread: model.hasUnread(convo),
+            unreadCount: model.localUnread[convo.peerID] ?? 0
+        )
     }
 }
