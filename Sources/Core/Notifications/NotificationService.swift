@@ -18,6 +18,14 @@ final class NotificationRouter: ObservableObject {
 /// поэтому уведомления рождаются на устройстве: из LongPoll (приложение открыто или
 /// живёт в фоне с играющей музыкой) и из периодической фоновой проверки (BGAppRefresh).
 enum NotificationService {
+    /// Компоненты бейджа на иконке приложения. iOS 15 не умеет ставить бейдж
+    /// отдельно от уведомления — он обновляется только при доставке, поэтому держим
+    /// две части по отдельности и ставим их сумму при каждой доставке, чтобы
+    /// активность и сообщения не затирали друг друга.
+    private static var messageBadge = 0
+    private static var activityBadge = 0
+    private static var combinedBadge: NSNumber { NSNumber(value: messageBadge + activityBadge) }
+
     /// Запрашивает разрешение на уведомления (системный алерт показывается один раз).
     static func requestPermission() async -> Bool {
         let center = UNUserNotificationCenter.current()
@@ -33,8 +41,12 @@ enum NotificationService {
         content.sound = .default
         content.threadIdentifier = "peer\(peerID)" // группировка по диалогам
         content.userInfo = ["peerID": peerID]
-        // Бейдж на иконке при закрытом приложении (в фоне его ведёт ConversationsViewModel).
-        if let badge { content.badge = NSNumber(value: badge) }
+        // Бейдж на иконке: сумма непрочитанных сообщений + активности (iOS 15 —
+        // бейдж обновляется только вместе с доставкой уведомления, копим две компоненты).
+        if let badge {
+            messageBadge = badge
+            content.badge = combinedBadge
+        }
         let request = UNNotificationRequest(identifier: "msg\(messageID)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
@@ -46,7 +58,7 @@ enum NotificationService {
     /// ВАЖНО: watermark НЕ зависит от серверного last_viewed — тот двигается при markAsViewed
     /// (открытие «Ответов») и «съедал» баннеры об активности, пришедшей после. Бейджем
     /// заведует отдельная логика (ActivityViewModel.unreadCount на базе last_viewed).
-    static func processActivity(_ res: NotificationsResponse, canBanner: Bool) {
+    static func processActivity(_ res: NotificationsResponse, canBanner: Bool, activityCount: Int = 0) {
         let key = "activity_notified_date"
         let defaults = UserDefaults.standard
         let lastNotified = defaults.integer(forKey: key)
@@ -60,6 +72,9 @@ enum NotificationService {
         let fresh = res.items.filter { $0.type != nil && $0.date > lastNotified }
         guard !fresh.isEmpty else { return }
         defaults.set(maxAll, forKey: key)
+        // ponytail: компоненту активности держим актуальной независимо от показа
+        // баннера (бейдж на иконке обновится при следующей доставке — и баннере, и сообщении).
+        activityBadge = activityCount
         guard canBanner else { return }
 
         var names: [Int: String] = [:]
@@ -70,7 +85,7 @@ enum NotificationService {
 
     /// Показывает уведомление о новой активности («Ответы»). Общий код для фонового опроса
     /// (BackgroundRefresh) И переднего плана (ActivityViewModel), чтобы формат не разъезжался.
-    static func notifyActivity(fresh: [ActivityNotification], names: [Int: String], identifierDate: Int) {
+    static func notifyActivity(fresh: [ActivityNotification], names: [Int: String], identifierDate: Int, activityCount: Int = 0) {
         guard let latest = fresh.max(by: { $0.date < $1.date }) else { return }
         let actorName = latest.actorID.flatMap { names[$0] }
         let line = actorName.map { "\($0) \(latest.phrase)" } ?? latest.standalonePhrase
@@ -80,6 +95,9 @@ enum NotificationService {
         content.sound = .default
         content.threadIdentifier = "activity"
         content.userInfo = ["activity": true]
+        // Бейдж на иконке = активность + сообщения (combinedBadge).
+        activityBadge = activityCount
+        content.badge = combinedBadge
         let request = UNNotificationRequest(identifier: "activity_\(identifierDate)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
@@ -181,6 +199,9 @@ enum BackgroundRefresh {
         guard let res: NotificationsResponse = try? await client.call(
             "notifications.get", params: ["count": "20"]
         ) else { return }
-        NotificationService.processActivity(res, canBanner: true)
+        // Непросмотренная активность (после watermark'а) — для бейджа на иконке.
+        let lastNotified = UserDefaults.standard.integer(forKey: "activity_notified_date")
+        let unread = res.items.filter { $0.type != nil && $0.date > lastNotified }.count
+        NotificationService.processActivity(res, canBanner: true, activityCount: unread)
     }
 }

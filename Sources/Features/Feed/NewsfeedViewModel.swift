@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Лента новостей (newsfeed.get / newsfeed.getGlobal) — записи друзей/сообществ или все записи.
 /// Пагинация курсором `start_from` → `next_from` (как в VK API).
@@ -8,6 +9,71 @@ import SwiftUI
 /// «В ленте пусто», а незавершённый запрос отменяется (та самая ошибка «cancelled»).
 @MainActor
 final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, Post, NewsfeedViewModel.Kind> {
+
+    /// Периодический опрос счётчиков (лайки/комменты/репосты) уже загруженных постов (60с).
+    /// Как в ActivityViewModel: таймер на Main RunLoop, переживает переоценку .task.
+    private var countsPollTimer: AnyCancellable?
+
+    override func loadIfNeeded(settings: AppSettings) async {
+        startCountsPolling(settings: settings)
+        await super.loadIfNeeded(settings: settings)
+    }
+
+    private func startCountsPolling(settings: AppSettings) {
+        guard countsPollTimer == nil else { return }
+        countsPollTimer = Timer.publish(every: 60, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                Task { await self.refreshCounts(settings: settings) }
+            }
+    }
+
+    /// Одним запросом wall.getById (список "owner_id_post_id" через запятую) подтягивает
+    /// свежие счётчики для уже загруженных постов — вместо перезапроса всей страницы.
+    /// OpenVK не шлёт LongPoll по лайкам/комментариям, опрос раз в минуту — единственный путь.
+    func refreshCounts(settings: AppSettings) async {
+        guard let token = settings.token, !items.isEmpty else { return }
+        // ponytail: cap на глубокую прокрутку (не раздувать URL), поднять при жалобах.
+        let ids = items.prefix(100).map(\.id).joined(separator: ",")
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        guard let res: WallResponse = try? await client.call("wall.getById", params: ["posts": ids]) else { return }
+
+        var byID: [String: Post] = [:]
+        for p in res.items { byID[p.id] = p }
+        guard !byID.isEmpty else { return }
+        items = items.map { byID[$0.id] ?? $0 }
+        persistCounts(byID)
+    }
+
+    /// Патчит счётчики прямо в уже сохранённом на диске кэше (Post не Encodable, полную
+    /// модель не пересериализовать) — иначе обновлённые числа терялись бы при перезапуске.
+    private func persistCounts(_ byID: [String: Post]) {
+        guard let raw = loadCache(),
+              var root = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+              var response = root["response"] as? [String: Any],
+              var itemsJSON = response["items"] as? [[String: Any]] else { return }
+
+        for i in itemsJSON.indices {
+            guard let ownerID = itemsJSON[i]["owner_id"] as? Int,
+                  let postID = itemsJSON[i]["id"] as? Int,
+                  let post = byID["\(ownerID)_\(postID)"] else { continue }
+            var likes = itemsJSON[i]["likes"] as? [String: Any] ?? [:]
+            likes["count"] = post.likesCount
+            likes["user_likes"] = post.userLikes ? 1 : 0
+            itemsJSON[i]["likes"] = likes
+            var comments = itemsJSON[i]["comments"] as? [String: Any] ?? [:]
+            comments["count"] = post.commentsCount
+            itemsJSON[i]["comments"] = comments
+            var reposts = itemsJSON[i]["reposts"] as? [String: Any] ?? [:]
+            reposts["count"] = post.repostsCount
+            itemsJSON[i]["reposts"] = reposts
+        }
+        response["items"] = itemsJSON
+        root["response"] = response
+        guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
+        saveCache(data)
+    }
 
     /// Моя лента (друзья + сообщества) или общая лента всех записей.
     enum Kind: Hashable { case my, global }

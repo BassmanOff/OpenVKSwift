@@ -14,6 +14,8 @@ final class ConversationsViewModel: ObservableObject {
     @Published private(set) var canLoadMore = false
     @Published var errorMessage: String?
     private var loaded = false
+    /// true, пока идёт load — параллельные вызовы (таймер/refresh/ретрай) пропускаются.
+    private var isReloading = false
 
     /// Пагинация: держим и перечитываем первые fetchLimit диалогов; скролл вниз добавляет страницу.
     /// Маленькая первая страница = быстрый первый кадр на медленном сервере.
@@ -185,6 +187,13 @@ final class ConversationsViewModel: ObservableObject {
             conversations = cached.conversations
             authors = cached.authors
         }
+        // Реентрантность: load зовут 60с-таймер, pull-to-refresh и ретрай ошибки.
+        // Без гварда накладываются параллельные getConversations (каждый ~7с на сервере)
+        // и дерутся за 6 соединений к хосту. Гвард ПОСЛЕ показа кэша — кэш-кадр не теряем.
+        guard !isReloading else { return }
+        isReloading = true
+        defer { isReloading = false }
+
         isLoading = conversations.isEmpty
         errorMessage = nil
         defer { isLoading = false }
@@ -210,6 +219,28 @@ final class ConversationsViewModel: ObservableObject {
         }
     }
 
+    /// Точечное обновление одного диалога по LongPoll-событию. peerID из события —
+    /// только ПОДСКАЗКА, какой диалог перечитать (поля события недоверенные, данные
+    /// берём обычным API); мусорный peerID даст пустой ответ — молча пропускаем.
+    /// На сервере getConversations — N+1 по всем диалогам (~7с на 20 диалогов),
+    /// getHistory одного пира — доли секунды. Полный reload остаётся 60с-таймеру.
+    func refreshPeer(_ peerID: Int, settings: AppSettings) async {
+        guard let token = settings.token else { return }
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        guard let res: HistoryResponse = try? await client.call(
+            "messages.getHistory",
+            params: ["peer_id": String(peerID), "count": "1", "extended": "1"]
+        ), let msg = res.items.first else { return }
+        for u in res.profiles ?? [] {
+            authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
+        }
+        conversations.removeAll { $0.peerID == peerID }
+        // Новое сообщение = самый свежий диалог — в начало (сервер сортирует так же).
+        // unreadCount: 1 для входящего повторяет серверную семантику (максимум 1).
+        conversations.insert(Conversation(peerID: peerID, unreadCount: msg.isOut ? 0 : 1, lastMessage: msg), at: 0)
+        Self.saveCache(DialogsCache(conversations: conversations, authors: authors))
+    }
+
     /// Закреплённый диалог может не попасть в загруженную страницу (пагинация — по свежести,
     /// а закреплённый мог давно молчать). Догружаем недостающих напрямую по peer_id и
     /// вклеиваем — иначе они молча пропадали бы из «закреплённых» до случайной догрузки страницы.
@@ -217,11 +248,21 @@ final class ConversationsViewModel: ObservableObject {
         let missing = pinnedOrder.filter { id in !conversations.contains { $0.peerID == id } }
         guard !missing.isEmpty, let token = settings.token else { return }
         let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
-        for peerID in missing {
-            guard let res: HistoryResponse = try? await client.call(
-                "messages.getHistory",
-                params: ["peer_id": String(peerID), "count": "1", "extended": "1"]
-            ) else { continue }
+        // Параллельно: N последовательных round-trip'ов схлопываются в один самый долгий.
+        let results = await withTaskGroup(of: (Int, HistoryResponse?).self) { group in
+            for peerID in missing {
+                group.addTask {
+                    (peerID, try? await client.call(
+                        "messages.getHistory",
+                        params: ["peer_id": String(peerID), "count": "1", "extended": "1"]
+                    ) as HistoryResponse)
+                }
+            }
+            var out: [(Int, HistoryResponse)] = []
+            for await (id, res) in group { if let res { out.append((id, res)) } }
+            return out
+        }
+        for (peerID, res) in results {
             for u in res.profiles ?? [] {
                 authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
             }
@@ -359,16 +400,12 @@ struct ConversationsView: View {
                         await model.load(settings: settings)
                     }
                 }
-                // Новое сообщение в любом диалоге — учитываем в счётчике и тихо
-                // обновляем список (load показывает спиннер только когда список пуст).
-                // Второй проход подбирает события, проглоченные сервером в очереди.
+                // Новое сообщение — точечно перечитываем ТОЛЬКО этот диалог (getHistory
+                // одного пира — доли секунды против ~7с полного getConversations с его
+                // серверным N+1). Потерянные события и чужие unread добирает 60с-таймер.
                 .onReceive(longPoll.newMessage) { event in
                     model.noteIncoming(peer: event.peerID)
-                    Task {
-                        await model.load(settings: settings)
-                        try? await Task.sleep(nanoseconds: 2_500_000_000)
-                        await model.load(settings: settings)
-                    }
+                    Task { await model.refreshPeer(event.peerID, settings: settings) }
                 }
         }
         .navigationViewStyle(.stack)

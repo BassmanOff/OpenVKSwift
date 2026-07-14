@@ -3,6 +3,16 @@ import Foundation
 struct OVKClient {
     static let userAgent = "OVK-iOS/0.1 (iPhone; iOS 15)"
 
+    /// Отдельная сессия API: не делит лимит 6 соединений/хост с аватарками
+    /// (CachedImage сидит на URLSession.shared) — иначе всплеск загрузки картинок
+    /// ставит API-запрос в очередь. ephemeral: кэш не нужен (политика запроса и так
+    /// reloadIgnoring + случайный _ovk), куки не нужны (токен в query).
+    private static let apiSession: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: cfg)
+    }()
+
     let instance: Instance
     let token: String?
     let apiVersion: String
@@ -56,7 +66,7 @@ struct OVKClient {
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.apiSession.data(for: request)
 
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw OVKError.http(http.statusCode)

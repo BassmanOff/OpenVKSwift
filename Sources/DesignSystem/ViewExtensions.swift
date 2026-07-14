@@ -16,14 +16,3 @@ struct ErrorRetry: View {
     }
 }
 
-extension View {
-    /// Прикрепляет контекст-меню только когда `enabled` (иначе пустого меню на long-press не будет).
-    @ViewBuilder
-    func conditionalContextMenu<M: View>(_ enabled: Bool, @ViewBuilder menuItems: () -> M) -> some View {
-        if enabled {
-            self.contextMenu { menuItems() }
-        } else {
-            self
-        }
-    }
-}

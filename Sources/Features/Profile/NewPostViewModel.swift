@@ -51,6 +51,43 @@ final class NewPostViewModel: ObservableObject {
         existingPoll = post.poll
     }
 
+    // MARK: - Черновик (PostDraftManager)
+
+    /// Есть что сохранять в черновик. Мягче canPost: черновик валиден и с
+    /// недозаполненным голосованием, и со сверхлимитным текстом — доредактируют потом.
+    var hasDraftContent: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !images.isEmpty || !audioTracks.isEmpty || !videos.isEmpty
+            || !docs.isEmpty || pollDraft != nil
+    }
+
+    /// Снимок состояния композера для сохранения на диск.
+    func snapshot(ownerID: Int, groupName: String?, postAsGroup: Bool, signed: Bool) -> PostDraft {
+        PostDraft(
+            ownerID: ownerID,
+            groupName: groupName,
+            postAsGroup: postAsGroup,
+            signed: signed,
+            text: text,
+            imagesJPEG: images.compactMap { $0.normalizedOrientation().jpegData(compressionQuality: 0.9) },
+            audioTracks: audioTracks,
+            videos: videos.map { PostDraft.VideoRef(videoID: $0.videoID, ownerID: $0.ownerID, title: $0.title, imageURL: $0.imageURL) },
+            docs: docs,
+            pollDraft: pollDraft
+        )
+    }
+
+    /// Восстановление композера из черновика (постоянная часть; postAsGroup/signed —
+    /// @State самой вьюхи, их восстанавливает NewPostView).
+    func restore(from draft: PostDraft) {
+        text = draft.text
+        images = draft.imagesJPEG.compactMap(UIImage.init(data:))
+        audioTracks = draft.audioTracks
+        videos = draft.videos.map(Video.init(ref:))
+        docs = draft.docs
+        pollDraft = draft.pollDraft
+    }
+
     var canPost: Bool {
         (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentCount > 0)
             && text.count <= Self.maxTextLength

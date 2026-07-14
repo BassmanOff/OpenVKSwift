@@ -5,6 +5,7 @@ struct MainTabView: View {
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var longPoll: LongPollService
     @EnvironmentObject private var keepAlive: KeepAliveService
+    @EnvironmentObject private var drafts: PostDraftManager
     @Environment(\.scenePhase) private var scenePhase
 
     /// Держим ли процесс живым в фоне (тихое аудио) — когда музыка не играет.
@@ -20,6 +21,9 @@ struct MainTabView: View {
     /// в её стек — VK-style (страница справа, свайп-назад, таб-бар на месте).
     @StateObject private var linkRouter = LinkRouter()
     @State private var showPlayer = false
+    /// Композер, открытый из чипа черновика (над таб-баром).
+    @State private var showDraftComposer = false
+    @State private var confirmDraftDiscard = false
     /// Модель диалогов живёт здесь: счётчик непрочитанных нужен бейджу на вкладке.
     @StateObject private var conversations = ConversationsViewModel()
     /// Активность («Ответы») живёт здесь — ЕДИНЫЙ источник для бейджа колокольчика (в ленте)
@@ -37,6 +41,11 @@ struct MainTabView: View {
             if player.current != nil {
                 MiniPlayerView(onExpand: { showPlayer = true })
             }
+            // Чип черновика поста — «свёрнутый композер» (как мини-приложения Telegram):
+            // виден, пока черновик существует; любой открытый композер-sheet накрывает его сам.
+            if drafts.draft != nil {
+                draftChip
+            }
             tabBar
         }
         // ГЛОБАЛЬНЫЙ перехват ссылок OpenVK: override навешен НАД всеми вкладками → наследуется
@@ -52,6 +61,14 @@ struct MainTabView: View {
         .sheet(isPresented: $showPlayer) {
             FullScreenPlayerView()
         }
+        .sheet(isPresented: $showDraftComposer) {
+            if let d = drafts.draft {
+                // onPosted пуст: VM стены отсюда недоступна, лента/стена обновятся
+                // при следующем открытии. Восстановление содержимого — внутри
+                // NewPostView (onAppear читает drafts.draft по ownerID).
+                NewPostView(ownerID: d.ownerID, groupName: d.groupName) { }
+            }
+        }
         .task {
             longPoll.start(settings: settings)
             // Уведомления включены по умолчанию — спрашиваем системное разрешение при
@@ -66,21 +83,14 @@ struct MainTabView: View {
                     settings.notifyMessages = false
                 }
             }
+            // Начальная загрузка «Ответов» + запуск периодического опроса (таймер
+            // внутри ActivityViewModel, независим от .task — SwiftUI отменяет бесконечные
+            // .task-циклы при переоценке body, из-за чего список не обновлялся сам).
+            await activity.loadIfNeeded(settings: settings)
             // Пока приложение открыто — держим статус «онлайн» (окно 5 мин, пингуем чаще).
             while !Task.isCancelled {
                 settings.reportOnline()
                 try? await Task.sleep(nanoseconds: 240 * 1_000_000_000)
-            }
-        }
-        // Периодический refresh активности («Ответы») — ЖИВЁТ НА ВСЕХ ВКЛАДКАХ (task привязан
-        // к контейнеру, а не к ленте) и при играющей музыке. OpenVK не шлёт LongPoll-событий
-        // об активности, поэтому опрос — единственный путь; интервал 30с (было 90с только в ленте).
-        .task {
-            await activity.loadIfNeeded(settings: settings)
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
-                print("[Notifications] \(debugNow()) периодический refresh активности")
-                await activity.reload(settings: settings)
             }
         }
         .onChange(of: selection) { sel in
@@ -185,6 +195,47 @@ struct MainTabView: View {
                 .allowsHitTesting(selection == .profile)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// «Свёрнутый» черновик поста: тап — продолжить редактирование, ✕ — удалить.
+    private var draftChip: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "square.and.pencil")
+                .foregroundColor(OVK.Palette.primary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Черновик записи")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(OVK.Palette.textPrimary)
+                if let name = drafts.draft?.groupName {
+                    Text("В «\(name)»")
+                        .font(.caption)
+                        .foregroundColor(OVK.Palette.textSecondary)
+                        .lineLimit(1)
+                } else if let t = drafts.draft?.text, !t.isEmpty {
+                    Text(t)
+                        .font(.caption)
+                        .foregroundColor(OVK.Palette.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Button { confirmDraftDiscard = true } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(OVK.Palette.textSecondary)
+                    .padding(6) // зона нажатия побольше самой иконки
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(OVK.Palette.card.overlay(Divider(), alignment: .top))
+        .contentShape(Rectangle())
+        .onTapGesture { showDraftComposer = true }
+        .confirmationDialog("Удалить черновик?", isPresented: $confirmDraftDiscard, titleVisibility: .visible) {
+            Button("Удалить", role: .destructive) { drafts.clear() }
+        }
     }
 
     private var tabBar: some View {

@@ -231,18 +231,20 @@ struct PostRow: View {
 
     private var footer: some View {
         HStack(spacing: 20) {
-            Button {
-                likes.toggle(post, settings: settings)
-            } label: {
-                Label("\(likes.count(post))", systemImage: likes.isLiked(post) ? "heart.fill" : "heart")
-                    .foregroundColor(likes.isLiked(post) ? .red : OVK.Palette.textSecondary)
-            }
-            .buttonStyle(.plain)
-            // Долгий тап по «сердечку» — сразу панель «кто оценил» (друзья вперёд).
-            // Не конфликтует с «Удалить»: контекст-меню записи висит на контенте, футер вне его.
-            .simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in
-                if likes.count(post) > 0 { showLikers = true }
-            })
+            // Тап — лайк, долгий тап — список оценивших. Раздельные .onTapGesture
+            // и .onLongPressGesture SwiftUI арбитрирует сам (быстрый тап засчитывает тап;
+            // удержание >0.4с — только long-press, тап при этом НЕ срабатывает).
+            // Не Button + .simultaneousGesture (оба срабатывали разом: лайк И список)
+            // и не LongPress.exclusively(before: Tap) (тап-лайк проглатывался).
+            Label("\(likes.count(post))", systemImage: likes.isLiked(post) ? "heart.fill" : "heart")
+                .foregroundColor(likes.isLiked(post) ? .red : OVK.Palette.textSecondary)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    likes.toggle(post, settings: settings)
+                }
+                .onLongPressGesture(minimumDuration: 0.4) {
+                    if likes.count(post) > 0 { showLikers = true }
+                }
 
             if commentTapEnabled {
                 Button { showCommentsSheet = true } label: {

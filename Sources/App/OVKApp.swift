@@ -11,6 +11,7 @@ struct OVKApp: App {
     @StateObject private var longPoll = LongPollService()
     @StateObject private var photoHero = PhotoHeroCoordinator()
     @StateObject private var keepAlive = KeepAliveService()
+    @StateObject private var drafts = PostDraftManager()
 
     init() {
         // Дисковый+памятный кэш для всех запросов (обложки, JSON-ответы, тексты).
@@ -43,6 +44,7 @@ struct OVKApp: App {
                 .environmentObject(longPoll)
                 .environmentObject(photoHero)
                 .environmentObject(keepAlive)
+                .environmentObject(drafts)
                 .preferredColorScheme(.light) // дизайн старого VK — всегда светлая тема
         }
     }
