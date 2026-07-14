@@ -92,6 +92,12 @@ struct MediaAttachmentsView: View {
                 Task { @MainActor in player.enqueue(track) }
             })
         }
+        // Переход к альбому — только если трек к нему привязан (MainTabView откроет «Музыку»).
+        if let album = track.album {
+            actions.append(UIAction(title: "Перейти к альбому", image: UIImage(systemName: "music.note.list")) { _ in
+                Task { @MainActor in player.pendingAlbum = album }
+            })
+        }
         if library.isAdded(track) {
             actions.append(UIAction(title: "Убрать из моей музыки",
                                     image: UIImage(systemName: "minus.circle"),

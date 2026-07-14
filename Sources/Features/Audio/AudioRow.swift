@@ -129,6 +129,15 @@ struct AudioRow: View {
                 Label("В конец очереди", systemImage: "list.bullet")
             }
         }
+        // Переход к альбому трека — только если он к нему привязан (MainTabView откроет «Музыку»,
+        // AudioListView — сам альбом; см. player.pendingAlbum).
+        if let album = track.album {
+            Button {
+                player.pendingAlbum = album
+            } label: {
+                Label("Перейти к альбому", systemImage: "music.note.list")
+            }
+        }
         if showAddToLibrary {
             if library.isAdded(track) {
                 Button(role: .destructive) {

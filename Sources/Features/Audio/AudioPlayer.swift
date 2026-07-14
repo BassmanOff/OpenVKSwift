@@ -23,6 +23,9 @@ final class AudioPlayer: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var isShuffled = false
     @Published private(set) var repeatMode: RepeatMode = .off
+    /// Запрос перехода к альбому играющего трека: плеер выставляет его (кнопка «К альбому»),
+    /// MainTabView переключается на вкладку «Музыка», AudioListView открывает альбом.
+    @Published var pendingAlbum: Album?
     /// Позиция/длительность — отдельный наблюдаемый объект (см. PlaybackClock).
     let clock = PlaybackClock()
 

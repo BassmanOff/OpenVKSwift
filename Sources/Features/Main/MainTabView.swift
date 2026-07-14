@@ -99,6 +99,10 @@ struct MainTabView: View {
         .onReceive(NotificationRouter.shared.$pendingActivity) { pending in
             if pending { selection = .feed }
         }
+        // Кнопка «К альбому» в плеере — переключаемся на «Музыку» (сам AudioListView откроет альбом).
+        .onReceive(player.$pendingAlbum) { album in
+            if album != nil { selection = .music }
+        }
         // Уведомление о сообщении, когда приложение не на экране
         // (реально случается, пока музыка держит нас живыми в фоне).
         .onReceive(longPoll.newMessage) { event in
