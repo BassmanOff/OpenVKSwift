@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// «Ответы» — сводка активности: уведомления (notifications.get: лайки/комменты/упоминания/
 /// репосты/записи на стене) + входящие заявки в друзья (friends.getRequests).
@@ -19,6 +20,11 @@ final class ActivityViewModel: ObservableObject {
     /// true, пока идёт reload — чтобы параллельные вызовы (периодический таймер + переход
     /// на вкладку + pull-to-refresh) не наслаивались и не гонялись за lastViewed.
     private var isReloading = false
+    /// Периодический опрос «Ответов» (15с): таймер на Main RunLoop, независим от
+    /// SwiftUI .task (бесконечные .task-циклы SwiftUI отменяет при переоценке body,
+    /// из-за чего список не обновлялся автоматически). OpenVK не шлёт LongPoll по
+    /// активности — опрос единственный путь.
+    private var pollTimer: AnyCancellable?
 
     /// Бейдж на колокольчике: непросмотренные (после серверного last_viewed) + заявки в друзья.
     /// НЕ путать с watermark'ом баннеров (activity_notified_date в NotificationService):
@@ -39,7 +45,20 @@ final class ActivityViewModel: ObservableObject {
     func loadIfNeeded(settings: AppSettings) async {
         guard !loaded else { return }
         loaded = true
+        startPolling(settings: settings)
         await reload(settings: settings)
+    }
+
+    /// Запускает периодический опрос (идемпотентно). Таймер переживает .task,
+    /// поэтому авто-обновление «Ответов» не пропадает при переоценке body вкладки.
+    private func startPolling(settings: AppSettings) {
+        guard pollTimer == nil else { return }
+        pollTimer = Timer.publish(every: 15, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                Task { await self.reload(settings: settings) }
+            }
     }
 
     func reload(settings: AppSettings) async {
@@ -64,14 +83,15 @@ final class ActivityViewModel: ObservableObject {
 
         if let notifs {
             mergeAuthors(profiles: notifs.profiles, groups: notifs.groups)
-            // Баннеры о свежей активности — общий с фоном код (один watermark, один формат).
-            NotificationService.processActivity(notifs, canBanner: settings.notifyMessages && !isBellVisible)
             notifications = notifs.items.filter { $0.type != nil }
             // ВАЖНО: watermark только ВПЕРЁД. Берём максимум с серверным last_viewed,
             // чтобы просмотренное не всплыло заново (при задержке серверной обработки markAsViewed).
             lastViewed = max(lastViewed, notifs.lastViewed ?? 0)
             offset = pageSize
             canLoadMore = notifs.items.count >= pageSize
+            // Баннеры + бейдж на иконке — ПОСЛЕ обновления списка/lastViewed,
+            // чтобы unreadCount был актуальным.
+            NotificationService.processActivity(notifs, canBanner: settings.notifyMessages && !isBellVisible, activityCount: unreadCount)
         } else if notifications.isEmpty {
             errorMessage = lastFetchError ?? "Не удалось загрузить уведомления"
         }

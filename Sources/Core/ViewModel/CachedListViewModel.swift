@@ -98,7 +98,7 @@ class CachedListViewModel<PageResponse: Decodable, Item: Identifiable, CacheKey:
             items += newItems
             let prev = nextCursor
             nextCursor = nextCursor(from: res)
-            print("[CachedList] cursor: \(prev) -> \(nextCursor ?? "nil"), canLoadMore: \((nextCursor ?? "").isEmpty || nextCursor == prev || newItems.count < pageSize || newItems.isEmpty ? false : true)")
+            print("[CachedList] cursor: \(prev ?? "nil") -> \(nextCursor ?? "nil"), canLoadMore: \((nextCursor ?? "").isEmpty || nextCursor == prev || newItems.count < pageSize || newItems.isEmpty ? false : true)")
             if (nextCursor ?? "").isEmpty || nextCursor == prev || newItems.count < pageSize || newItems.isEmpty {
                 canLoadMore = false
             }

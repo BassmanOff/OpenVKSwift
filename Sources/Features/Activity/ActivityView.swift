@@ -29,8 +29,8 @@ struct ActivityView: View {
                 CommentsView(ownerID: ref.ownerID, postID: ref.postID, fallbackIDs: ref.fallbackIDs)
             }
             .task {
-                await model.loadIfNeeded(settings: settings)
-                await model.markViewed(settings: settings) // открыли — гасим бейдж
+                await model.reload(settings: settings) // открыли — всегда свежий список
+                await model.markViewed(settings: settings) // и гасим бейдж
             }
             .onAppear { model.isBellVisible = true } // видимое не баннерим
             .onDisappear {
