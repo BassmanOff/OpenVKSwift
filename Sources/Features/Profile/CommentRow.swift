@@ -12,12 +12,16 @@ struct CommentRow: View {
     var ownerID: Int = 0
     /// Нажатие «Ответить» (подставляет упоминание в поле ввода). nil — кнопку не показываем.
     var onReply: (() -> Void)? = nil
+    /// Можно ли удалить комментарий. onDelete nil — пункт/кнопка не показываются.
+    var canDelete: Bool = false
+    var onDelete: (() -> Void)? = nil
 
     @EnvironmentObject private var likes: LikesManager
     @EnvironmentObject private var photoHero: PhotoHeroCoordinator
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.openURL) private var openURL
     @State private var showLikers = false
+    @State private var confirmDelete = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -64,18 +68,22 @@ struct CommentRow: View {
                         .font(.caption2)
                         .foregroundColor(OVK.Palette.textSecondary)
 
-                    Button {
-                        likes.toggle(comment: comment, ownerID: ownerID, settings: settings)
-                    } label: {
-                        Label("\(likes.count(comment: comment))",
-                              systemImage: likes.isLiked(comment: comment) ? "heart.fill" : "heart")
-                            .font(.caption2)
-                            .foregroundColor(likes.isLiked(comment: comment) ? .red : OVK.Palette.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in
-                        if likes.count(comment: comment) > 0 { showLikers = true }
-                    })
+                    // Тап — лайк, долгий тап — список оценивших. Раздельные .onTapGesture
+                    // и .onLongPressGesture SwiftUI арбитрирует сам (быстрый тап засчитывает
+                    // тап; удержание >0.4с — только long-press, тап при этом НЕ срабатывает).
+                    // Не Button + .simultaneousGesture (оба срабатывали разом: лайк И список)
+                    // и не LongPress.exclusively(before: Tap) (тап-лайк проглатывался).
+                    Label("\(likes.count(comment: comment))",
+                          systemImage: likes.isLiked(comment: comment) ? "heart.fill" : "heart")
+                        .font(.caption2)
+                        .foregroundColor(likes.isLiked(comment: comment) ? .red : OVK.Palette.textSecondary)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            likes.toggle(comment: comment, ownerID: ownerID, settings: settings)
+                        }
+                        .onLongPressGesture(minimumDuration: 0.4) {
+                            if likes.count(comment: comment) > 0 { showLikers = true }
+                        }
 
                     if let onReply {
                         Button(action: onReply) {
@@ -89,11 +97,30 @@ struct CommentRow: View {
                 .padding(.top, 2)
             }
             Spacer(minLength: 0)
+            // Явная кнопка «⋯» вместо contextMenu на всю строку: долгий тап по строке
+            // конфликтовал с долгим тапом по «сердечку» — оба открывались разом (см. PostRow).
+            if canDelete, onDelete != nil {
+                Menu {
+                    Button(role: .destructive) { confirmDelete = true } label: {
+                        Label("Удалить", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(OVK.Palette.textSecondary)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .sheet(isPresented: $showLikers) {
             LikersView(commentOwnerID: ownerID, commentID: comment.commentID)
+        }
+        .confirmationDialog("Удалить комментарий?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Удалить", role: .destructive) { onDelete?() }
         }
     }
 

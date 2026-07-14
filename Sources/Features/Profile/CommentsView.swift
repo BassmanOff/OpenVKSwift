@@ -105,23 +105,23 @@ struct CommentsView: View {
                             onReply: {
                                 model.prefillReply(to: authorID, name: model.authors[authorID]?.name)
                                 inputFocused = true
-                            }
-                        )
-                            .background(OVK.Palette.card)
+                            },
                             // can_delete у OpenVK для коммента считается по посту, поэтому
                             // ещё разрешаем удалять СВОИ комментарии (from_id == мой id).
-                            .conditionalContextMenu(comment.canDelete || comment.fromID == (settings.userID ?? Int.min)) {
-                                Button(role: .destructive) {
-                                    Task { await model.delete(comment, settings: settings) }
-                                } label: {
-                                    Label("Удалить", systemImage: "trash")
-                                }
-                            }
+                            canDelete: comment.canDelete || comment.fromID == (settings.userID ?? Int.min),
+                            onDelete: { Task { await model.delete(comment, settings: settings) } }
+                        )
+                            .background(OVK.Palette.card)
                         Divider().padding(.leading, 58)
                     }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Тап по пустому месту списка (не по кнопке/ссылке — те перехватывают
+            // хит-тест первыми) убирает клавиатуру. GrowingTextEditor — свой UITextView
+            // без встроенного "тап вне поля" на iOS 15, поэтому без этого клавиатуру
+            // было нечем закрыть, кроме кнопки отправки.
+            .onTapGesture { inputFocused = false }
         }
     }
 
