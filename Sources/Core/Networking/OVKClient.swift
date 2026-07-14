@@ -120,6 +120,35 @@ struct OVKClient {
         return saved.first.map { "photo\($0.ownerID)_\($0.photoID)" }
     }
 
+    private struct AlbumUploadServer: Decodable { let uploadURL: String; enum CodingKeys: String, CodingKey { case uploadURL = "upload_url" } }
+    /// photos.getUploadServer ВСЕГДА открывает multifile-слот на сервере (VKAPI Photos.php
+    /// жёстко шлёт multifile=true в getPhotoUploadUrl, даже для одного файла) — поэтому
+    /// upload-эндпоинт ждёт файл в поле "photo1" (не "photo") и отвечает photos_list
+    /// (JSON-строка вида [{keyholder,resource,club}]), а не парой photo/hash как у стены.
+    private struct AlbumUploadResult: Decodable { let photosList: String; let hash: String
+        enum CodingKeys: String, CodingKey { case photosList = "photos_list"; case hash }
+    }
+
+    /// Создаёт фотоальбом (photos.createAlbum) и возвращает его.
+    func createPhotoAlbum(title: String, description: String = "") async throws -> Album {
+        try await call("photos.createAlbum", params: ["title": title, "description": description])
+    }
+
+    /// Загружает фото в альбом: getUploadServer → multipart-upload → photos.save.
+    /// Возвращает сохранённое фото (у него есть прямые ссылки на .jpeg в sizes).
+    func uploadPhotoToAlbum(jpeg data: Data, albumID: Int) async throws -> Photo? {
+        let server: AlbumUploadServer = try await call(
+            "photos.getUploadServer", params: ["album_id": String(albumID)]
+        )
+        guard let url = URL(string: server.uploadURL) else { return nil }
+        let responseData = try await uploadImage(data, to: url, field: "photo1")
+        let upload = try JSONDecoder().decode(AlbumUploadResult.self, from: responseData)
+        let saved: ItemsResponse<Photo> = try await call("photos.save", params: [
+            "photos_list": upload.photosList, "hash": upload.hash, "album_id": String(albumID)
+        ])
+        return saved.items.first
+    }
+
     private struct OwnerUploadServer: Decodable { let uploadURL: String; enum CodingKeys: String, CodingKey { case uploadURL = "upload_url" } }
     private struct OwnerUploadResult: Decodable { let photo: String; let hash: String }
 

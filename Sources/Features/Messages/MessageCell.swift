@@ -17,16 +17,23 @@ enum OVKUI {
     static let link          = UIColor(OVK.Palette.link)
 }
 
-/// Сообщение-«фото»: raw CDN-ссылка на картинку как единственный текст сообщения.
-/// ЛС не поддерживают настоящие вложения через API (см. в техдокументации) — так выглядит
-/// пересланная напрямую ссылка на файл; показываем её как картинку, а не как текст-ссылку.
-func messageImageURL(in text: String) -> URL? {
+/// Сообщение-«фото»: raw CDN-ссылка на картинку в начале текста (сама по себе или с подписью
+/// после неё). ЛС не поддерживают настоящие вложения через API (см. в техдокументации) — так
+/// выглядит пересланная напрямую ссылка на файл; показываем её как картинку, а не текст-ссылку.
+/// Ссылка — первый токен до пробела/переноса строки, остаток (если есть) — подпись под фото.
+func messageImageURL(in text: String) -> (url: URL, caption: String)? {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let url = URL(string: trimmed), let host = url.host?.lowercased(),
-          host == "cdn.openvk.org" || host == "cdn.openvk.xyz" else { return nil }
+    guard !trimmed.isEmpty else { return nil }
+    let split = trimmed.rangeOfCharacter(from: .whitespacesAndNewlines)
+    let urlToken = split.map { String(trimmed[..<$0.lowerBound]) } ?? trimmed
+    let caption = split.map { String(trimmed[$0.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+    // Любой хост в домене openvk (cdn./api./web/голый) — фото-ссылки OpenVK строятся от
+    // хоста запроса (HTTP_HOST), поэтому наши загрузки прилетают не только с cdn., но и с api.
+    guard let url = URL(string: urlToken), let host = url.host?.lowercased(),
+          host.hasSuffix("openvk.org") || host.hasSuffix("openvk.xyz") else { return nil }
     let ext = url.pathExtension.lowercased()
     guard ["jpg", "jpeg", "png", "gif", "webp"].contains(ext) else { return nil }
-    return url
+    return (url, caption)
 }
 
 /// Группировка реакций для чипов: эмодзи → (сколько, есть ли моя).
@@ -170,6 +177,23 @@ final class MessageCell: UICollectionViewCell {
         photoImageView.heightAnchor.constraint(equalToConstant: Self.photoSize),
         bottomRow.topAnchor.constraint(equalTo: photoImageView.bottomAnchor, constant: 2)
     ]
+    /// «Фото + подпись»: тот же квадрат, но под ним текст (остаток сообщения после ссылки),
+    /// а не сразу bottomRow. Высота текста статична (известна на configure(), без загрузки
+    /// картинки) — не нарушает детерминированность высоты ячейки ДО подгрузки фото.
+    private lazy var photoCaptionMode: [NSLayoutConstraint] = [
+        photoImageView.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 4),
+        photoImageView.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),
+        photoImageView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -4),
+        photoImageView.widthAnchor.constraint(equalToConstant: Self.photoSize),
+        photoImageView.heightAnchor.constraint(equalToConstant: Self.photoSize),
+        textView.topAnchor.constraint(equalTo: photoImageView.bottomAnchor, constant: 6),
+        textView.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 12),
+        textView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
+        bottomRow.topAnchor.constraint(equalTo: textView.bottomAnchor, constant: 2)
+    ]
+    /// Какой из трёх наборов (textMode/photoMode/photoCaptionMode) активен сейчас —
+    /// чтобы деактивировать именно его, а не гадать по isHidden.
+    private var activeContentMode: [NSLayoutConstraint] = []
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -229,6 +253,7 @@ final class MessageCell: UICollectionViewCell {
             bottomRow.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -8)
         ])
         NSLayoutConstraint.activate(textMode) // дефолт — текстовый режим
+        activeContentMode = textMode
 
         let press = UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:)))
         press.minimumPressDuration = 0.33
@@ -255,28 +280,23 @@ final class MessageCell: UICollectionViewCell {
 
         bubble.backgroundColor = isOut ? OVKUI.primary : OVKUI.card
 
-        if let imageURL = messageImageURL(in: text) {
-            NSLayoutConstraint.deactivate(textMode)
-            NSLayoutConstraint.activate(photoMode)
-            textView.isHidden = true
+        if let (imageURL, caption) = messageImageURL(in: text) {
+            let mode = caption.isEmpty ? photoMode : photoCaptionMode
+            NSLayoutConstraint.deactivate(activeContentMode)
+            NSLayoutConstraint.activate(mode)
+            activeContentMode = mode
             photoImageView.isHidden = false
             loadPhoto(imageURL)
+            textView.isHidden = caption.isEmpty
+            if !caption.isEmpty { applyText(caption, isOut: isOut) }
         } else {
-            NSLayoutConstraint.deactivate(photoMode)
+            NSLayoutConstraint.deactivate(activeContentMode)
             NSLayoutConstraint.activate(textMode)
+            activeContentMode = textMode
             photoImageView.isHidden = true
             textView.isHidden = false
             cancelPhotoLoad()
-
-            // Текст с кликабельными ссылками/упоминаниями (общая линкификация с лентой).
-            let attributed = NSMutableAttributedString(attributedString: NSAttributedString(linkifiedText(text)))
-            let full = NSRange(location: 0, length: attributed.length)
-            attributed.addAttribute(.font, value: UIFont.preferredFont(forTextStyle: .subheadline), range: full)
-            attributed.addAttribute(.foregroundColor, value: isOut ? UIColor.white : OVKUI.textPrimary, range: full)
-            textView.attributedText = attributed
-            textView.linkTextAttributes = isOut
-                ? [.foregroundColor: UIColor.white, .underlineStyle: NSUnderlineStyle.single.rawValue]
-                : [.foregroundColor: OVKUI.link]
+            applyText(text, isOut: isOut)
         }
 
         timeLabel.text = Self.timeText(date)
@@ -336,6 +356,19 @@ final class MessageCell: UICollectionViewCell {
     @objc private func photoTapped() {
         guard let currentPhotoURL else { return }
         onOpenImage?(currentPhotoURL, photoImageView) // тот же полноэкранный просмотрщик, что в ленте
+    }
+
+    /// Текст с кликабельными ссылками/упоминаниями (общая линкификация с лентой) — общий
+    /// путь для обычного текстового сообщения и подписи под фото-сообщением.
+    private func applyText(_ text: String, isOut: Bool) {
+        let attributed = NSMutableAttributedString(attributedString: NSAttributedString(linkifiedText(text)))
+        let full = NSRange(location: 0, length: attributed.length)
+        attributed.addAttribute(.font, value: UIFont.preferredFont(forTextStyle: .subheadline), range: full)
+        attributed.addAttribute(.foregroundColor, value: isOut ? UIColor.white : OVKUI.textPrimary, range: full)
+        textView.attributedText = attributed
+        textView.linkTextAttributes = isOut
+            ? [.foregroundColor: UIColor.white, .underlineStyle: NSUnderlineStyle.single.rawValue]
+            : [.foregroundColor: OVKUI.link]
     }
 
     /// Тот же память-кэш и даунсэмплинг-конвейер, что у CachedImage (DesignSystem) — просто

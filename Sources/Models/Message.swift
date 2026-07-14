@@ -67,6 +67,15 @@ struct Conversation: Codable, Identifiable, Hashable {
     }
     private enum PeerKeys: String, CodingKey { case id }
 
+    /// Ручное создание — для закреплённого диалога, недогруженного пагинацией
+    /// (см. ConversationsViewModel.ensurePinnedLoaded: строим по messages.getHistory,
+    /// не по messages.getConversations — там уже нет постраничного «конверта»).
+    init(peerID: Int, unreadCount: Int, lastMessage: Message?) {
+        self.peerID = peerID
+        self.unreadCount = unreadCount
+        self.lastMessage = lastMessage
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let convo = try c.nestedContainer(keyedBy: ConvoKeys.self, forKey: .conversation)

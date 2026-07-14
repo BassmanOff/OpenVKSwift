@@ -7,6 +7,8 @@ struct NewPostView: View {
     /// Название сообщества — задаётся, когда постим на стену группы, которой управляем
     /// (GroupView). nil = обычная личная запись, никаких флагов от_группы не шлём.
     var groupName: String? = nil
+    /// Редактируемая запись. nil = обычное создание новой записи (wall.post).
+    var editingPost: Post? = nil
 
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var model = NewPostViewModel()
@@ -22,11 +24,15 @@ struct NewPostView: View {
     @State private var postAsGroup: Bool
     @State private var signed = false
 
-    init(ownerID: Int, groupName: String? = nil, onPosted: @escaping () -> Void) {
+    init(ownerID: Int, groupName: String? = nil, editingPost: Post? = nil, onPosted: @escaping () -> Void) {
         self.ownerID = ownerID
         self.groupName = groupName
+        self.editingPost = editingPost
         self.onPosted = onPosted
-        _postAsGroup = State(initialValue: groupName != nil)
+        // При редактировании — признак «от имени сообщества» берём из самой записи
+        // (fromID сообщества, а не пользователя), а не из groupName (при правке чужого поста
+        // в PostRow название сообщества под рукой может не быть).
+        _postAsGroup = State(initialValue: editingPost.map { $0.fromID < 0 } ?? (groupName != nil))
     }
 
     var body: some View {
@@ -34,11 +40,12 @@ struct NewPostView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let groupName { identityBar(groupName) }
                 textEditor
-                if !model.images.isEmpty { attachments }
+                if !model.existingPhotos.isEmpty || !model.images.isEmpty { attachments }
                 if !model.audioTracks.isEmpty { audioAttachments }
                 if !model.videos.isEmpty { videoAttachments }
                 if !model.docs.isEmpty { docAttachments }
-                if let draft = model.pollDraft { pollAttachment(draft) }
+                if let poll = model.existingPoll { existingPollAttachment(poll) }
+                else if let draft = model.pollDraft { pollAttachment(draft) }
                 addBar
                 if let error = model.errorMessage {
                     Text(error).font(.footnote).foregroundColor(.red).padding(.horizontal)
@@ -46,8 +53,11 @@ struct NewPostView: View {
                 Spacer()
             }
             .background(OVK.Palette.card.ignoresSafeArea())
-            .navigationTitle("Новая запись")
+            .navigationTitle(editingPost == nil ? "Новая запись" : "Редактировать запись")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if let editingPost { model.loadForEdit(editingPost) }
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Отмена") { dismiss() }
@@ -56,12 +66,21 @@ struct NewPostView: View {
                     if model.isPosting {
                         ProgressView()
                     } else {
-                        Button("Опубликовать") {
+                        Button(editingPost == nil ? "Опубликовать" : "Сохранить") {
                             Task {
-                                if await model.publish(
-                                    ownerID: ownerID, settings: settings,
-                                    fromGroup: postAsGroup, signed: signed
-                                ) {
+                                let success: Bool
+                                if let editingPost {
+                                    success = await model.edit(
+                                        ownerID: editingPost.ownerID, postID: editingPost.postID,
+                                        settings: settings, fromGroup: postAsGroup
+                                    )
+                                } else {
+                                    success = await model.publish(
+                                        ownerID: ownerID, settings: settings,
+                                        fromGroup: postAsGroup, signed: signed
+                                    )
+                                }
+                                if success {
                                     onPosted()
                                     dismiss()
                                 }
@@ -131,6 +150,19 @@ struct NewPostView: View {
     private var attachments: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                ForEach(Array(model.existingPhotos.enumerated()), id: \.offset) { index, photo in
+                    ZStack(alignment: .topTrailing) {
+                        CachedImage(url: photo.thumbURL) { OVK.Palette.background }
+                            .frame(width: 90, height: 90)
+                            .clipped().cornerRadius(6)
+                        Button { model.removeExistingPhoto(at: index) } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.white)
+                                .background(Circle().fill(Color.black.opacity(0.5)))
+                        }
+                        .padding(4)
+                    }
+                }
                 ForEach(Array(model.images.enumerated()), id: \.offset) { index, image in
                     ZStack(alignment: .topTrailing) {
                         Image(uiImage: image)
@@ -217,6 +249,26 @@ struct NewPostView: View {
         .padding(.vertical, 4)
     }
 
+    /// Голосование, уже прикреплённое к записи — можно только убрать, не редактировать
+    /// (вопрос/варианты меняются отдельным экраном, которого у существующих голосований нет).
+    private func existingPollAttachment(_ poll: Poll) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chart.bar").foregroundColor(OVK.Palette.primary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(poll.question).font(.subheadline).lineLimit(1)
+                    .foregroundColor(OVK.Palette.textPrimary)
+                Text("\(poll.answers.count) вариантов").font(.caption).foregroundColor(OVK.Palette.textSecondary)
+            }
+            Spacer()
+            Button { model.removeExistingPoll() } label: {
+                Image(systemName: "xmark.circle.fill").foregroundColor(OVK.Palette.textSecondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 4)
+    }
+
     private func pollAttachment(_ draft: PollDraft) -> some View {
         Button { showPollComposer = true } label: {
             HStack(spacing: 8) {
@@ -257,8 +309,10 @@ struct NewPostView: View {
                     Button { showDocPicker = true } label: {
                         Label("Файл", systemImage: "doc")
                     }
-                    Button { showPollComposer = true } label: {
-                        Label("Голосование", systemImage: "chart.bar")
+                    if model.canAddPoll {
+                        Button { showPollComposer = true } label: {
+                            Label("Голосование", systemImage: "chart.bar")
+                        }
                     }
                 } label: {
                     Image(systemName: "plus.circle")

@@ -5,6 +5,8 @@ struct PostRow: View {
     let post: Post
     let authors: [Int: WallViewModel.Author]
     var onDelete: ((Post) -> Void)? = nil
+    /// Пост изменился (wall.edit) — родитель обычно перечитывает его через refreshPost().
+    var onEdited: ((Post) -> Void)? = nil
     /// Отключает интерактивность кнопки комментариев (используется при встраивании PostRow в CommentsView).
     var commentTapEnabled: Bool = true
     @EnvironmentObject private var player: AudioPlayer
@@ -15,6 +17,7 @@ struct PostRow: View {
     @State private var showCommentsSheet = false
     @State private var showLikers = false
     @State private var confirmDelete = false
+    @State private var showEditSheet = false
     /// Оригинал репоста, дозагруженный через wall.getById (в copy_history API кладёт только фото).
     @State private var fullRepost: Post?
 
@@ -52,6 +55,11 @@ struct PostRow: View {
         }
         .sheet(isPresented: $showLikers) {
             LikersView(ownerID: post.ownerID, postID: post.postID)
+        }
+        .sheet(isPresented: $showEditSheet) {
+            NewPostView(ownerID: post.ownerID, groupName: authors[post.ownerID]?.name, editingPost: post) {
+                onEdited?(post)
+            }
         }
         .confirmationDialog("Удалить запись?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Удалить", role: .destructive) { onDelete?(post) }
@@ -110,13 +118,24 @@ struct PostRow: View {
             }
             .buttonStyle(.plain)
             Spacer()
-            // Крестик удаления (как в старом VK) — только на своих записях.
+            // Меню «⋯» (изменить/удалить) — только когда есть хоть одно из прав.
             // Явная кнопка вместо долгих тапов/contextMenu: те конфликтовали то с
             // «сердечком», то со скроллом List (см. историю правок).
-            if post.canDelete && onDelete != nil {
-                Button { confirmDelete = true } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .medium))
+            if (post.canEdit && onEdited != nil) || (post.canDelete && onDelete != nil) {
+                Menu {
+                    if post.canEdit && onEdited != nil {
+                        Button { showEditSheet = true } label: {
+                            Label("Изменить", systemImage: "pencil")
+                        }
+                    }
+                    if post.canDelete && onDelete != nil {
+                        Button(role: .destructive) { confirmDelete = true } label: {
+                            Label("Удалить", systemImage: "trash")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .medium))
                         .foregroundColor(OVK.Palette.textSecondary)
                         .padding(8) // зона нажатия побольше самой иконки
                         .contentShape(Rectangle())

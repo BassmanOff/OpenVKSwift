@@ -15,6 +15,8 @@ struct AudioListView: View {
     @State private var tab: Tab = .online
     @State private var scope: Scope = .tracks
     @State private var searchText = ""
+    /// Альбом, открытый по кнопке «К альбому» из плеера (программный push, см. .background ниже).
+    @State private var routeAlbum: Album?
 
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
@@ -34,6 +36,21 @@ struct AudioListView: View {
             .pushesGlobalLinks(tab: 3) // ссылки из музыки пушатся в стек этой вкладки
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(OVK.Palette.background.ignoresSafeArea())
+            // Программный переход к альбому играющего трека (кнопка «К альбому» в плеере).
+            // Один NavigationLink(isActive:) в фоне — как в GroupView (не в строке List).
+            .background(
+                NavigationLink(
+                    isActive: Binding(get: { routeAlbum != nil }, set: { if !$0 { routeAlbum = nil } })
+                ) {
+                    if let routeAlbum { AlbumDetailView(album: routeAlbum) }
+                } label: { EmptyView() }
+                .hidden()
+            )
+            .onReceive(player.$pendingAlbum) { album in
+                guard let album else { return }
+                tab = .playlists       // назад из альбома пользователь попадёт в «Плейлисты»
+                routeAlbum = album
+            }
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
