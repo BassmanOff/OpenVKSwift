@@ -314,8 +314,55 @@ final class ChatViewModel: ObservableObject {
 
     func send(peerID: Int, settings: AppSettings) async {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let client = client(settings), !body.isEmpty else { return }
+        guard !body.isEmpty else { return }
         text = ""
+        await sendBody(body, peerID: peerID, settings: settings)
+    }
+
+    /// Загружает фото в альбом «_Private(OVK_iOS)» (у OpenVK нет вложений в ЛС) и шлёт
+    /// прямую ссылку на .jpeg обычным сообщением — на приёме она рисуется фото-баблом.
+    /// `onProgress`/`onError` — для тоста в UI (загрузка идёт заметное время).
+    func sendPhoto(_ image: UIImage, peerID: Int, settings: AppSettings,
+                   onProgress: (String) -> Void, onError: (String) -> Void) async {
+        guard let client = client(settings),
+              let data = image.normalizedOrientation().jpegData(compressionQuality: 0.9) else { return }
+        onProgress("Загрузка фото…")
+        do {
+            let photo: Photo?
+            do {
+                photo = try await client.uploadPhotoToAlbum(
+                    jpeg: data, albumID: try await ensurePMAlbum(client: client, settings: settings)
+                )
+            } catch OVKError.api(let code, _) where code == 114 {
+                // Сохранённый альбом удалён на сайте — сбрасываем кэш, пересоздаём, повторяем раз.
+                settings.pmPhotoAlbumID = nil
+                photo = try await client.uploadPhotoToAlbum(
+                    jpeg: data, albumID: try await ensurePMAlbum(client: client, settings: settings)
+                )
+            }
+            guard let url = photo?.bestURL else {
+                onError("Не удалось загрузить фото")
+                return
+            }
+            await sendBody(url.absoluteString, peerID: peerID, settings: settings)
+        } catch {
+            if error.isCancellation { return }
+            onError(error.localizedDescription)
+        }
+    }
+
+    /// id альбома фото-ЛС: берём сохранённый или создаём. Если сохранённый протух (альбом
+    /// удалили на сайте) — upload упадёт кодом 114, тогда сбрасываем кэш и пересоздаём (один раз).
+    private func ensurePMAlbum(client: OVKClient, settings: AppSettings) async throws -> Int {
+        if let id = settings.pmPhotoAlbumID { return id }
+        let album = try await client.createPhotoAlbum(title: "_Private(OVK_iOS)",
+                                                      description: "Фото из личных сообщений (OVK iOS)")
+        settings.pmPhotoAlbumID = album.albumID
+        return album.albumID
+    }
+
+    private func sendBody(_ body: String, peerID: Int, settings: AppSettings) async {
+        guard let client = client(settings), !body.isEmpty else { return }
         // Мгновенно показываем сообщение как «отправляется» (оптимистично).
         let optimistic = PendingMessage(text: body, date: Int(Date().timeIntervalSince1970))
         pending.append(optimistic)
@@ -477,6 +524,8 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = ChatViewModel()
     @State private var toast: String?
+    @State private var showPhotoPicker = false
+    @State private var showPhotoNotice = false
 
     var body: some View {
         ZStack {
@@ -488,6 +537,11 @@ struct ChatView: View {
                            let photo = Photo.remote(url: url)
                            photoHero.registerSource(view, for: photo.id) // закрытие «влетит» обратно
                            photoHero.present(photos: [photo], index: 0, post: nil, from: view)
+                       },
+                       onAttach: {
+                           // Первый раз — предупреждаем про общедоступный альбом, потом сразу пикер.
+                           if settings.didWarnPMPhoto { showPhotoPicker = true }
+                           else { showPhotoNotice = true }
                        })
                 // Клавиатуру обрабатывает UIKit-контроллер (нативные уведомления).
                 .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -497,6 +551,25 @@ struct ChatView: View {
             }
         }
         .background(OVK.Palette.background.ignoresSafeArea())
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPicker { image in
+                Task {
+                    await model.sendPhoto(image, peerID: peerID, settings: settings,
+                                          onProgress: { toast = $0 }, onError: { toast = $0 })
+                }
+            }
+        }
+        .alert("Фото в личных сообщениях", isPresented: $showPhotoNotice) {
+            Button("Отмена", role: .cancel) {}
+            Button("Продолжить") {
+                settings.didWarnPMPhoto = true
+                showPhotoPicker = true
+            }
+        } message: {
+            Text("OpenVK не поддерживает вложения в личных сообщениях. Все отправляемые фото "
+                 + "дублируются в отдельный альбом «_Private(OVK_iOS)», который доступен всем. "
+                 + "Не отправляйте так конфиденциальные изображения.")
+        }
         .handlesOVKLinks() // без этого ссылки в сообщениях пушатся в корень вкладки «Сообщения», а не сюда
         .navigationBarTitleDisplayMode(.inline)
         // Своя стрелка без текста: системная подпись то «Назад», то «Сообщения»

@@ -10,16 +10,19 @@ struct ChatScreen: UIViewControllerRepresentable {
     var onToast: (String) -> Void
     var onOpenURL: (URL) -> Void
     var onOpenImage: (URL, UIView) -> Void
+    var onAttach: () -> Void
 
     func makeUIViewController(context: Context) -> ChatScreenController {
         ChatScreenController(model: model, settings: settings, peerID: peerID,
-                             onToast: onToast, onOpenURL: onOpenURL, onOpenImage: onOpenImage)
+                             onToast: onToast, onOpenURL: onOpenURL, onOpenImage: onOpenImage,
+                             onAttach: onAttach)
     }
 
     func updateUIViewController(_ controller: ChatScreenController, context: Context) {
         controller.onToast = onToast
         controller.onOpenURL = onOpenURL
         controller.onOpenImage = onOpenImage
+        controller.onAttach = onAttach
     }
 }
 
@@ -41,6 +44,8 @@ final class ChatScreenController: UIViewController {
     var onToast: (String) -> Void
     var onOpenURL: (URL) -> Void
     var onOpenImage: (URL, UIView) -> Void
+    /// Тап по «скрепке» — SwiftUI-слой показывает предупреждение/пикер (см. ChatView).
+    var onAttach: () -> Void
 
     // Список
     private var collectionView: UICollectionView!
@@ -82,13 +87,14 @@ final class ChatScreenController: UIViewController {
 
     init(model: ChatViewModel, settings: AppSettings, peerID: Int,
          onToast: @escaping (String) -> Void, onOpenURL: @escaping (URL) -> Void,
-         onOpenImage: @escaping (URL, UIView) -> Void) {
+         onOpenImage: @escaping (URL, UIView) -> Void, onAttach: @escaping () -> Void) {
         self.model = model
         self.settings = settings
         self.peerID = peerID
         self.onToast = onToast
         self.onOpenURL = onOpenURL
         self.onOpenImage = onOpenImage
+        self.onAttach = onAttach
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -221,7 +227,7 @@ final class ChatScreenController: UIViewController {
         let symbol = UIImage.SymbolConfiguration(pointSize: 22)
         attachButton.setImage(UIImage(systemName: "paperclip", withConfiguration: symbol), for: .normal)
         attachButton.tintColor = OVKUI.textSecondary
-        attachButton.addAction(UIAction { [weak self] _ in self?.onToast("В разработке…") }, for: .touchUpInside)
+        attachButton.addAction(UIAction { [weak self] _ in self?.onAttach() }, for: .touchUpInside)
 
         sendButton.setImage(UIImage(systemName: "paperplane.fill", withConfiguration: symbol), for: .normal)
         sendButton.addAction(UIAction { [weak self] _ in self?.sendTapped() }, for: .touchUpInside)
