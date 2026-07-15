@@ -28,25 +28,41 @@ final class GroupsViewModel: ObservableObject {
         errorMessage = nil
         defer { isLoading = false }
 
-        do {
-            let all: ItemsResponse<Community> = try await client.call(
-                "groups.get",
-                params: ["user_id": String(userID), "extended": "1", "fields": Self.fields, "count": "1000"]
-            )
-            allGroups = all.items
-        } catch {
+        // Оба запроса независимы (разные фильтры одного user_id) — грузим параллельно,
+        // а не один за другим, иначе к результату добавляется round-trip второго запроса.
+        async let allTask: Result<ItemsResponse<Community>, Error> = {
+            do {
+                let all: ItemsResponse<Community> = try await client.call(
+                    "groups.get",
+                    params: ["user_id": String(userID), "extended": "1", "fields": Self.fields, "count": "1000"]
+                )
+                return .success(all)
+            } catch {
+                return .failure(error)
+            }
+        }()
+        // Управляемые: filter=admin доступен только для своего профиля — у чужого просто пусто.
+        async let adminTask: Result<ItemsResponse<Community>, Error> = {
+            do {
+                let admin: ItemsResponse<Community> = try await client.call(
+                    "groups.get",
+                    params: ["user_id": String(userID), "filter": "admin", "extended": "1", "fields": Self.fields, "count": "1000"]
+                )
+                return .success(admin)
+            } catch {
+                return .failure(error)
+            }
+        }()
+
+        switch await allTask {
+        case .success(let all): allGroups = all.items
+        case .failure(let error):
             if error.isCancellation { return }
             errorMessage = error.localizedDescription
         }
-        // Управляемые: filter=admin доступен только для своего профиля — у чужого просто пусто.
-        do {
-            let admin: ItemsResponse<Community> = try await client.call(
-                "groups.get",
-                params: ["user_id": String(userID), "filter": "admin", "extended": "1", "fields": Self.fields, "count": "1000"]
-            )
-            adminGroups = admin.items
-        } catch {
-            adminGroups = []
+        switch await adminTask {
+        case .success(let admin): adminGroups = admin.items
+        case .failure: adminGroups = []
         }
         loaded = true
     }

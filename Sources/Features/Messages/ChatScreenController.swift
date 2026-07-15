@@ -23,6 +23,7 @@ struct ChatScreen: UIViewControllerRepresentable {
         controller.onOpenURL = onOpenURL
         controller.onOpenImage = onOpenImage
         controller.onAttach = onAttach
+        controller.refreshPostCardStyleIfNeeded()
     }
 }
 
@@ -63,6 +64,14 @@ final class ChatScreenController: UIViewController {
     private var heightCacheWidth: CGFloat = 0
     /// Шаблонная ячейка для замера высот — та же раскладка, что у живых ячеек.
     private let sizingCell = MessageCell(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+    /// Превью карточек ссылок-на-запись (wall123_456), по ключу "ownerID_postID" — резолвятся
+    /// асинхронно (RepostCache), высота карточки от них не зависит (см. MessageCell), поэтому
+    /// приход превью просто перерисовывает содержимое строки, а не меняет layout.
+    private var postPreviews: [String: MessagePostPreview] = [:]
+    private var pendingPreviewKeys: Set<String> = []
+    /// Компакт/развёрнутая карточка — тумблер в настройках; при его смене высоты карточек
+    /// меняются, heightCache для них должен сброситься.
+    private var lastFullCardSetting: Bool
 
     // Панель ввода
     private let inputBar = UIView()
@@ -95,6 +104,7 @@ final class ChatScreenController: UIViewController {
         self.onOpenURL = onOpenURL
         self.onOpenImage = onOpenImage
         self.onAttach = onAttach
+        self.lastFullCardSetting = settings.messagePostFullCard
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -469,13 +479,22 @@ final class ChatScreenController: UIViewController {
         return h.finalize()
     }
 
-    private func configure(_ cell: MessageCell, row: ChatViewModel.ChatRow, width: CGFloat) {
+    private func configure(_ cell: MessageCell, row: ChatViewModel.ChatRow, width: CGFloat, triggerLoad: Bool = true) {
         let myID = settings.userID ?? 0
+        let text: String
+        switch row {
+        case .message(let m): text = m.text
+        case .pending(let p): text = p.text
+        }
+        let preview = resolvePostPreview(for: text, rowID: row.id, triggerLoad: triggerLoad)
+        let useFullCard = settings.messagePostFullCard
+
         switch row {
         case .message(let m):
             let status: MessageDelivery? = m.isOut ? (m.id <= model.outRead ? .read : .sent) : nil
             cell.configure(text: m.text, date: m.date, isOut: m.isOut, status: status,
-                           reactions: reactionGroups(model.reactions[m.id], myID: myID), width: width)
+                           reactions: reactionGroups(model.reactions[m.id], myID: myID), width: width,
+                           postPreview: preview, useFullPostCard: useFullCard)
             cell.onLongPress = { [weak self, weak cell] in self?.presentMenu(message: m, cell: cell) }
             cell.onReact = { [weak self] emoji in
                 guard let self else { return }
@@ -483,12 +502,60 @@ final class ChatScreenController: UIViewController {
             }
         case .pending(let p):
             cell.configure(text: p.text, date: p.date, isOut: true,
-                           status: p.failed ? .failed : .sending, reactions: [], width: width)
+                           status: p.failed ? .failed : .sending, reactions: [], width: width,
+                           postPreview: preview, useFullPostCard: useFullCard)
             cell.onLongPress = nil
             cell.onReact = nil
         }
         cell.onOpenURL = { [weak self] url in self?.onOpenURL(url) }
         cell.onOpenImage = { [weak self] url, view in self?.onOpenImage(url, view) }
+    }
+
+    /// Превью карточки ссылки-на-запись. `triggerLoad` false — только чтение уже
+    /// резолвленного (используется при замере высоты шаблонной ячейкой, см. sizeForItemAt);
+    /// true — живая ячейка, можно запускать сетевой запрос, если превью ещё нет.
+    private func resolvePostPreview(for text: String, rowID: String, triggerLoad: Bool) -> MessagePostPreview? {
+        guard let wallPost = messageWallPost(in: text) else { return nil }
+        let key = "\(wallPost.ownerID)_\(wallPost.postID)"
+        if let cached = postPreviews[key] { return cached }
+        guard triggerLoad, !pendingPreviewKeys.contains(key) else { return nil }
+        pendingPreviewKeys.insert(key)
+        Task { [weak self] in
+            guard let self else { return }
+            let resolved = await RepostCache.shared.messagePreview(
+                ownerID: wallPost.ownerID, postID: wallPost.postID, settings: self.settings
+            )
+            self.pendingPreviewKeys.remove(key)
+            guard let resolved else { return }
+            self.postPreviews[key] = resolved
+            self.reconfigureRow(id: rowID)
+        }
+        return nil
+    }
+
+    /// Перерисовывает ОДНУ строку (пришло превью карточки записи). Высота карточки теперь
+    /// зависит от длины текста превью (короткий пост — низкая карточка, см. MessageCell
+    /// postCardFullMode), а до резолва превью она была неизвестна — сбрасываем именно ЭТУ
+    /// строку из heightCache, чтобы она перемерилась с реальным текстом.
+    private func reconfigureRow(id: String) {
+        var snapshot = dataSource.snapshot()
+        guard snapshot.itemIdentifiers.contains(id) else { return }
+        heightCache.removeValue(forKey: id)
+        snapshot.reconfigureItems([id])
+        dataSource.apply(snapshot, animatingDifferences: false)
+        collectionView.collectionViewLayout.invalidateLayout()
+    }
+
+    /// Тумблер «развёрнутая карточка» сменился, пока экран открыт — высоты карточек другие,
+    /// сбрасываем heightCache и перекладываем список.
+    func refreshPostCardStyleIfNeeded() {
+        guard lastFullCardSetting != settings.messagePostFullCard else { return }
+        lastFullCardSetting = settings.messagePostFullCard
+        heightCache.removeAll()
+        var snapshot = dataSource.snapshot()
+        snapshot.reconfigureItems(snapshot.itemIdentifiers)
+        dataSource.apply(snapshot, animatingDifferences: false)
+        collectionView.collectionViewLayout.invalidateLayout()
     }
 
     // MARK: Клавиатура
@@ -701,7 +768,9 @@ extension ChatScreenController: UICollectionViewDelegateFlowLayout {
         if let cached = heightCache[id] {
             return CGSize(width: width, height: cached)
         }
-        configure(sizingCell, row: row, width: width)
+        // triggerLoad: false — замер высоты не должен сам стрелять сетевыми запросами
+        // за превью (sizeForItemAt дёргается на каждый layout pass).
+        configure(sizingCell, row: row, width: width, triggerLoad: false)
         let height = sizingCell.measuredHeight(width: width)
         heightCache[id] = height
         return CGSize(width: width, height: height)
