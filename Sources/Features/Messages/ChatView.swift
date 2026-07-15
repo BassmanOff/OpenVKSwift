@@ -520,9 +520,15 @@ struct ChatView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var longPoll: LongPollService
     @EnvironmentObject private var photoHero: PhotoHeroCoordinator
-    @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = ChatViewModel()
+    /// Свой роутер, а НЕ @Environment(\.openURL): тот резолвится из окружения ChatView САМОГО
+    /// (заданного предком — глобальным роутером MainTabView), а .handlesOVKLinks() ниже влияет
+    /// только на детей ChatView, не на его собственное чтение environment. Со старым кодом
+    /// (openURL из environment) тап по ссылке/карточке записи уходил в ГЛОБАЛЬНЫЙ роутер,
+    /// который пушит из корня вкладки «Сообщения» (см. .pushesGlobalLinks в ConversationsView) —
+    /// это выталкивало ChatView из стека, и «закрыть» возвращало к списку диалогов, а не в чат.
+    @StateObject private var linkRouter = LinkRouter()
     @State private var toast: String?
     @State private var showPhotoPicker = false
     @State private var showPhotoNotice = false
@@ -531,7 +537,7 @@ struct ChatView: View {
         ZStack {
             ChatScreen(model: model, peerID: peerID,
                        onToast: { toast = $0 },
-                       onOpenURL: { openURL($0) }, // перехватывается handlesOVKLinks
+                       onOpenURL: { url in _ = linkRouter.open(url) }, // пушится ЛОКАЛЬНО, в стек этого чата
                        onOpenImage: { url, view in
                            // Тот же полноэкранный UIKit-просмотрщик, что в ленте/комментариях.
                            let photo = Photo.remote(url: url)
@@ -551,6 +557,21 @@ struct ChatView: View {
             }
         }
         .background(OVK.Palette.background.ignoresSafeArea())
+        // Пуш назначений linkRouter — В СТЕК ЭТОГО ЧАТА (см. комментарий у linkRouter выше),
+        // а не в корень вкладки. Тот же приём, что .handlesOVKLinks() использует для модалок.
+        .background(
+            NavigationLink(
+                isActive: Binding(
+                    get: { linkRouter.destination != nil },
+                    set: { if !$0 { linkRouter.destination = nil } }
+                )
+            ) {
+                if let dest = linkRouter.destination {
+                    LinkDestinationView(destination: dest).handlesOVKLinks()
+                }
+            } label: { EmptyView() }
+            .hidden()
+        )
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker { image in
                 Task {
@@ -649,6 +670,6 @@ struct ChatView: View {
 
     private func openProfile() {
         guard let url = URL(string: "https://openvk.org/id\(peerID)") else { return }
-        openURL(url) // перехватывается handlesOVKLinks → профиль внутри приложения
+        _ = linkRouter.open(url) // пушится в стек этого чата, см. linkRouter
     }
 }

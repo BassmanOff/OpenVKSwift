@@ -39,6 +39,11 @@ final class AppSettings: ObservableObject {
     @Published var countArchivedUnread: Bool {
         didSet { defaults.set(countArchivedUnread, forKey: archivedUnreadKey) }
     }
+    /// Карточка репоста-ссылки (wall123_456) в ЛС: компактная строка (по умолчанию) или
+    /// развёрнутая карточка с аватаром/фото на всю ширину.
+    @Published var messagePostFullCard: Bool {
+        didSet { defaults.set(messagePostFullCard, forKey: postCardKey) }
+    }
 
     /// id альбома «_Private(OVK_iOS)», куда дублируются фото из ЛС (у OpenVK нет вложений
     /// в личных сообщениях — шлём прямой линк на .jpeg из этого альбома). Создаётся при
@@ -69,6 +74,7 @@ final class AppSettings: ObservableObject {
     private let imageOptKey = "image_optimization"
     private let reactionsKey = "enable_custom_reactions"
     private let archivedUnreadKey = "count_archived_unread"
+    private let postCardKey = "message_post_full_card"
     private let pmAlbumKey = "pm_photo_album_id"
     private let pmWarnKey = "pm_photo_warned"
 
@@ -87,6 +93,7 @@ final class AppSettings: ObservableObject {
         imageOptimization = defaults.object(forKey: imageOptKey) as? Bool ?? true
         enableCustomReactions = defaults.object(forKey: reactionsKey) as? Bool ?? true
         countArchivedUnread = defaults.object(forKey: archivedUnreadKey) as? Bool ?? true
+        messagePostFullCard = defaults.object(forKey: postCardKey) as? Bool ?? false
     }
 
     var isLoggedIn: Bool { token != nil }

@@ -18,6 +18,9 @@ struct PostRow: View {
     @State private var showLikers = false
     @State private var confirmDelete = false
     @State private var showEditSheet = false
+    @State private var showRepostSheet = false
+    @State private var localRepostsCount: Int?
+    @State private var toastMessage: String?
     /// Оригинал репоста, дозагруженный через wall.getById (в copy_history API кладёт только фото).
     @State private var fullRepost: Post?
 
@@ -64,6 +67,13 @@ struct PostRow: View {
         .confirmationDialog("Удалить запись?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Удалить", role: .destructive) { onDelete?(post) }
         }
+        .sheet(isPresented: $showRepostSheet) {
+            RepostSheet(post: post) { message, bumpCount in
+                toastMessage = message
+                if bumpCount { localRepostsCount = (localRepostsCount ?? post.repostsCount) + 1 }
+            }
+        }
+        .toast($toastMessage)
         .task { await loadFullRepost() }
     }
 
@@ -256,8 +266,11 @@ struct PostRow: View {
                 Label("\(post.commentsCount)", systemImage: "bubble.right")
                     .foregroundColor(OVK.Palette.textSecondary)
             }
-            Label("\(post.repostsCount)", systemImage: "arrowshape.turn.up.right")
-                .foregroundColor(OVK.Palette.textSecondary)
+            Button { showRepostSheet = true } label: {
+                Label("\(localRepostsCount ?? post.repostsCount)", systemImage: "arrowshape.turn.up.right")
+                    .foregroundColor(OVK.Palette.textSecondary)
+            }
+            .buttonStyle(.plain)
             Spacer()
         }
         .font(.system(size: 15)) // как в PhotoHero (pointSize 16 иконка / 15pt текст)
@@ -285,10 +298,56 @@ final class RepostCache {
     private var cache: [String: Post] = [:]
     private var failed: Set<String> = []
 
+    private var previewCache: [String: MessagePostPreview] = [:]
+    private var previewFailed: Set<String> = []
+
     /// Стирает память-кэш дозагруженных репостов — отладка из настроек.
     func clear() {
         cache = [:]
         failed = []
+        previewCache = [:]
+        previewFailed = []
+    }
+
+    /// Превью для карточки ссылки-на-запись в ЛС (не путать с fullPost — тому нужны только
+    /// вложения оригинала репоста, этому нужны ещё автор/группа из profiles/groups).
+    func messagePreview(ownerID: Int, postID: Int, settings: AppSettings) async -> MessagePostPreview? {
+        let key = "\(ownerID)_\(postID)"
+        if let hit = previewCache[key] { return hit }
+        if previewFailed.contains(key) { return nil }
+        guard let token = settings.token else { return nil }
+
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        do {
+            let res: WallResponse = try await client.call(
+                "wall.getById", params: ["posts": key, "extended": "1"]
+            )
+            guard let post = res.items.first else {
+                previewFailed.insert(key)
+                return nil
+            }
+            var authorName = "Пользователь"
+            var authorAvatar: URL?
+            if post.ownerID < 0 {
+                if let g = res.groups?.first(where: { $0.groupID == -post.ownerID }) {
+                    authorName = g.name
+                    authorAvatar = g.avatarURL
+                }
+            } else if let u = res.profiles?.first(where: { $0.id == post.fromID }) {
+                authorName = u.fullName
+                authorAvatar = u.avatarURL
+            }
+            let preview = MessagePostPreview(
+                authorName: authorName, authorAvatarURL: authorAvatar,
+                thumbURL: post.photos.first?.bestURL, thumbAspectRatio: post.photos.first?.aspectRatio,
+                snippet: String(post.text.prefix(140))
+            )
+            previewCache[key] = preview
+            return preview
+        } catch {
+            if !error.isCancellation { previewFailed.insert(key) }
+            return nil
+        }
     }
 
     func fullPost(ownerID: Int, postID: Int, settings: AppSettings) async -> Post? {

@@ -36,6 +36,32 @@ func messageImageURL(in text: String) -> (url: URL, caption: String)? {
     return (url, caption)
 }
 
+/// Сообщение — целиком ссылка на запись (wall{owner}_{post}), например наш репост-в-ЛС
+/// (RepostViewModel.sendLink шлёт ТОЛЬКО ссылку, без подписи). Показываем как карточку
+/// с превью вместо голого текста-ссылки. Переиспользует LinkParser — тот же разбор,
+/// что и у тапа по ссылке (handlesOVKLinks), поэтому карточка и обычный текст-линк
+/// всегда ведут в одно и то же место.
+func messageWallPost(in text: String) -> (url: URL, ownerID: Int, postID: Int)? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+          let url = URL(string: trimmed),
+          case .post(let ownerID, let postID)? = LinkParser.parse(url) else { return nil }
+    return (url, ownerID, postID)
+}
+
+/// Превью для карточки записи в ЛС — заполняется асинхронно (RepostCache.messagePreview),
+/// высота ячейки фиксирована ДО загрузки (postCardCompactMode/postCardFullMode), поэтому
+/// приход превью не меняет layout, только содержимое уже отведённых мест.
+struct MessagePostPreview {
+    let authorName: String
+    let authorAvatarURL: URL?
+    let thumbURL: URL?
+    /// Ширина/высота фото поста (Photo.aspectRatio) — чтобы карточка не кадрировала его
+    /// в квадрат, а показывала целиком, как PostRow делает в ленте.
+    let thumbAspectRatio: CGFloat?
+    let snippet: String
+}
+
 /// Группировка реакций для чипов: эмодзи → (сколько, есть ли моя).
 /// Сортируем по эмодзи — порядок словаря случаен и «прыгал» бы между обновлениями.
 func reactionGroups(_ reactions: [Int: MessageReaction]?, myID: Int) -> [(emoji: String, count: Int, mine: Bool)] {
@@ -141,10 +167,48 @@ final class MessageCell: UICollectionViewCell {
     private let markView = DeliveryMarkView()
     private let chipsRow = UIStackView()
 
+    /// Карточка ссылки-на-запись (wall123_456) в ЛС — своя мини-иерархия внутри bubble,
+    /// компактный/развёрнутый вид переключается тем же набором констрейнтов, что
+    /// text/photo-режимы (см. activeContentMode).
+    private let postCard = UIView()
+    private let postAccentBar = UIView() // только в развёрнутом виде — как полоса форварда в Telegram
+    private let postThumbView = UIImageView()
+    private let postAuthorLabel = UILabel()
+    private let postSnippetLabel = UILabel()
+    private var postThumbLoadTask: Task<Void, Never>?
+    private var currentPostThumbURL: URL?
+    private var currentPostCardURL: URL?
+    /// true — тумбнейл сейчас показывает РЕАЛЬНОЕ фото поста (не аватар автора-фолбэк).
+    /// В этом случае тумбнейл рисуется как обычное фото-сообщение (photoSize, тап — во
+    /// весь экран через onOpenImage), а не как маленькая иконка карточки.
+    private var postThumbIsRealPhoto = false
+
     /// Фиксированный размер фото-бабла — НЕ зависит от реальных размеров картинки (их не
     /// узнать заранее, ссылка ведёт просто на файл). Так высота ячейки детерминирована ДО
     /// загрузки — не нужно инвалидировать heightCache в контроллере, когда фото догрузится.
     private static let photoSize: CGFloat = 200
+    /// Реальное фото поста, В ОТЛИЧИЕ от голой CDN-ссылки, ЗНАЕТ свои пропорции заранее
+    /// (Photo.aspectRatio приходит вместе с превью) — показываем его целиком, не кадрируя
+    /// в квадрат, вписывая в бокс (photoSize × postPhotoMaxHeight). Поэтому у тумбнейла тут
+    /// не константа, а МЕНЯЕМЫЕ констрейнты (см. postThumbPhotoWidth/HeightConstraint) —
+    /// пересчитываются в configure() под конкретное фото.
+    private static let postPhotoMaxHeight: CGFloat = 300
+    private lazy var postThumbPhotoWidthConstraint = postThumbView.widthAnchor.constraint(equalToConstant: Self.photoSize)
+    private lazy var postThumbPhotoHeightConstraint = postThumbView.heightAnchor.constraint(equalToConstant: Self.photoSize)
+    /// Высоты карточки записи — фиксированы по той же причине (превью грузится асинхронно).
+    private static let postCompactHeight: CGFloat = 72
+    private static let postCompactThumbSize: CGFloat = 56
+    /// «Развёрнутая» карточка — как форвард в Telegram: цветная полоса слева, маленький
+    /// тумбнейл+автор в шапке, текст записи ниже в несколько строк. НЕ полноширинный баннер —
+    /// тот распластывал аватар автора на весь баблон, когда у поста нет фото ("большие иконки
+    /// профиля" вместо текста).
+    /// Высота снизу НЕ фиксирована константой (в отличие от фото/тумбнейла) — сниппет сам
+    /// определяет свою высоту по факту текста (1 короткая строка не тянет за собой пустое
+    /// место на 4 строки), см. postCardFullMode: снизу привязка идёт к низу сниппета, а не
+    /// к postCard.heightAnchor. Контроллер обязан сбросить heightCache строки, когда превью
+    /// приходит асинхронно (см. ChatScreenController.reconfigureRow) — до этого момента текст
+    /// неизвестен и подставляется заглушка.
+    private static let postFullThumbSize: CGFloat = 28
     private var photoLoadTask: Task<Void, Never>?
     private var currentPhotoURL: URL?
 
@@ -191,8 +255,97 @@ final class MessageCell: UICollectionViewCell {
         textView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
         bottomRow.topAnchor.constraint(equalTo: textView.bottomAnchor, constant: 2)
     ]
-    /// Какой из трёх наборов (textMode/photoMode/photoCaptionMode) активен сейчас —
-    /// чтобы деактивировать именно его, а не гадать по isHidden.
+    /// Карточка записи, компактный вид: квадратный тумбнейл слева, автор+сниппет справа —
+    /// одна невысокая строка, как обычная фото-ссылка.
+    private lazy var postCardCompactMode: [NSLayoutConstraint] = [
+        postCard.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 4),
+        postCard.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),
+        postCard.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -4),
+        postCard.heightAnchor.constraint(equalToConstant: Self.postCompactHeight),
+        bottomRow.topAnchor.constraint(equalTo: postCard.bottomAnchor, constant: 4),
+
+        postThumbView.leadingAnchor.constraint(equalTo: postCard.leadingAnchor, constant: 8),
+        postThumbView.centerYAnchor.constraint(equalTo: postCard.centerYAnchor),
+        postThumbView.widthAnchor.constraint(equalToConstant: Self.postCompactThumbSize),
+        postThumbView.heightAnchor.constraint(equalToConstant: Self.postCompactThumbSize),
+
+        postAuthorLabel.topAnchor.constraint(equalTo: postThumbView.topAnchor, constant: 2),
+        postAuthorLabel.leadingAnchor.constraint(equalTo: postThumbView.trailingAnchor, constant: 10),
+        postAuthorLabel.trailingAnchor.constraint(equalTo: postCard.trailingAnchor, constant: -8),
+
+        postSnippetLabel.topAnchor.constraint(equalTo: postAuthorLabel.bottomAnchor, constant: 2),
+        postSnippetLabel.leadingAnchor.constraint(equalTo: postThumbView.trailingAnchor, constant: 10),
+        postSnippetLabel.trailingAnchor.constraint(equalTo: postCard.trailingAnchor, constant: -8),
+        postSnippetLabel.heightAnchor.constraint(equalToConstant: 32)
+    ]
+    /// Карточка записи, развёрнутый вид — форвард как в Telegram: цветная полоса слева,
+    /// маленький тумбнейл+автор в шапке, текст записи ниже в несколько строк. Никакого
+    /// полноширинного фото-баннера — на посте без фото он растягивал аватар автора на весь
+    /// баблон ("большие иконки профиля" вместо текста).
+    /// Высота НЕ фиксирована константой: низ карточки идёт от низа сниппета (интринсик-размер
+    /// по факту текста, до 4 строк) — короткий пост не тянет за собой пустое место.
+    private lazy var postCardFullMode: [NSLayoutConstraint] = [
+        postCard.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 4),
+        postCard.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),
+        postCard.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -4),
+        bottomRow.topAnchor.constraint(equalTo: postCard.bottomAnchor, constant: 4),
+
+        postAccentBar.topAnchor.constraint(equalTo: postCard.topAnchor),
+        postAccentBar.bottomAnchor.constraint(equalTo: postCard.bottomAnchor),
+        postAccentBar.leadingAnchor.constraint(equalTo: postCard.leadingAnchor),
+        postAccentBar.widthAnchor.constraint(equalToConstant: 3),
+
+        postThumbView.topAnchor.constraint(equalTo: postCard.topAnchor, constant: 8),
+        postThumbView.leadingAnchor.constraint(equalTo: postAccentBar.trailingAnchor, constant: 8),
+        postThumbView.widthAnchor.constraint(equalToConstant: Self.postFullThumbSize),
+        postThumbView.heightAnchor.constraint(equalToConstant: Self.postFullThumbSize),
+
+        postAuthorLabel.centerYAnchor.constraint(equalTo: postThumbView.centerYAnchor),
+        postAuthorLabel.leadingAnchor.constraint(equalTo: postThumbView.trailingAnchor, constant: 8),
+        postAuthorLabel.trailingAnchor.constraint(equalTo: postCard.trailingAnchor, constant: -8),
+
+        postSnippetLabel.topAnchor.constraint(equalTo: postThumbView.bottomAnchor, constant: 6),
+        postSnippetLabel.leadingAnchor.constraint(equalTo: postAccentBar.trailingAnchor, constant: 8),
+        postSnippetLabel.trailingAnchor.constraint(equalTo: postCard.trailingAnchor, constant: -8),
+        postSnippetLabel.bottomAnchor.constraint(equalTo: postCard.bottomAnchor, constant: -8)
+    ]
+    /// Карточка записи С РЕАЛЬНЫМ фото поста — тумбнейл ровно того же размера (photoSize),
+    /// что у обычного фото-сообщения (см. photoMode), и тап по нему открывает тот же
+    /// полноэкранный просмотрщик (onOpenImage), а не пост — фото должно выглядеть и вести
+    /// себя ТОЧНО как фото с cdn.openvk.org. Тонкая шапка с автором сверху — тап по НЕЙ (не
+    /// по фото) открывает исходную запись. Используется НЕЗАВИСИМО от тумблера
+    /// компакт/развёрнуто — тот выбор влияет только на посты БЕЗ фото.
+    private lazy var postCardFullPhotoMode: [NSLayoutConstraint] = [
+        postCard.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 4),
+        postCard.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),
+        postCard.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -4),
+        bottomRow.topAnchor.constraint(equalTo: postCard.bottomAnchor, constant: 4),
+
+        postAccentBar.topAnchor.constraint(equalTo: postCard.topAnchor),
+        postAccentBar.bottomAnchor.constraint(equalTo: postCard.bottomAnchor),
+        postAccentBar.leadingAnchor.constraint(equalTo: postCard.leadingAnchor),
+        postAccentBar.widthAnchor.constraint(equalToConstant: 3),
+
+        postAuthorLabel.topAnchor.constraint(equalTo: postCard.topAnchor, constant: 6),
+        postAuthorLabel.leadingAnchor.constraint(equalTo: postAccentBar.trailingAnchor, constant: 8),
+        postAuthorLabel.trailingAnchor.constraint(equalTo: postCard.trailingAnchor, constant: -8),
+
+        postThumbView.topAnchor.constraint(equalTo: postAuthorLabel.bottomAnchor, constant: 6),
+        postThumbView.leadingAnchor.constraint(equalTo: postAccentBar.trailingAnchor, constant: 8),
+        postThumbPhotoWidthConstraint,
+        postThumbPhotoHeightConstraint,
+        // БЕЗ этой связки ширину карточки задавал текст имени автора (у фото не было связи
+        // с правым краем), фото на 200pt вылезало за карточку и срезалось её clipsToBounds —
+        // тот самый «обрезанный справа» баг. Заставляем карточку быть не уже фото.
+        postCard.trailingAnchor.constraint(greaterThanOrEqualTo: postThumbView.trailingAnchor, constant: 8),
+
+        postSnippetLabel.topAnchor.constraint(equalTo: postThumbView.bottomAnchor, constant: 6),
+        postSnippetLabel.leadingAnchor.constraint(equalTo: postAccentBar.trailingAnchor, constant: 8),
+        postSnippetLabel.trailingAnchor.constraint(equalTo: postCard.trailingAnchor, constant: -8),
+        postSnippetLabel.bottomAnchor.constraint(equalTo: postCard.bottomAnchor, constant: -8)
+    ]
+    /// Какой из наборов (textMode/photoMode/photoCaptionMode/postCard{Compact,Full,FullPhoto}Mode)
+    /// активен сейчас — чтобы деактивировать именно его, а не гадать по isHidden.
     private var activeContentMode: [NSLayoutConstraint] = []
 
     override init(frame: CGRect) {
@@ -228,6 +381,36 @@ final class MessageCell: UICollectionViewCell {
         photoImageView.translatesAutoresizingMaskIntoConstraints = false
         photoImageView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(photoTapped)))
         bubble.addSubview(photoImageView)
+
+        postCard.layer.cornerRadius = 8
+        postCard.clipsToBounds = true
+        postCard.isHidden = true
+        postCard.isUserInteractionEnabled = true
+        postCard.translatesAutoresizingMaskIntoConstraints = false
+        postCard.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(postCardTapped(_:))))
+        bubble.addSubview(postCard)
+
+        postAccentBar.layer.cornerRadius = 1.5
+        postAccentBar.isHidden = true
+        postAccentBar.translatesAutoresizingMaskIntoConstraints = false
+        postCard.addSubview(postAccentBar)
+
+        postThumbView.contentMode = .scaleAspectFill
+        postThumbView.clipsToBounds = true
+        postThumbView.layer.cornerRadius = 8 // как у photoImageView — реальное фото поста должно выглядеть так же
+        postThumbView.backgroundColor = OVKUI.background
+        postThumbView.translatesAutoresizingMaskIntoConstraints = false
+        postCard.addSubview(postThumbView)
+
+        postAuthorLabel.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .semibold)
+        postAuthorLabel.numberOfLines = 1
+        postAuthorLabel.translatesAutoresizingMaskIntoConstraints = false
+        postCard.addSubview(postAuthorLabel)
+
+        postSnippetLabel.font = .preferredFont(forTextStyle: .footnote)
+        postSnippetLabel.numberOfLines = 2
+        postSnippetLabel.translatesAutoresizingMaskIntoConstraints = false
+        postCard.addSubview(postSnippetLabel)
 
         timeLabel.font = .preferredFont(forTextStyle: .caption2)
         bottomRow.axis = .horizontal
@@ -267,12 +450,14 @@ final class MessageCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         cancelPhotoLoad()
+        cancelPostThumbLoad()
     }
 
     // MARK: Конфигурация
 
     func configure(text: String, date: Int, isOut: Bool, status: MessageDelivery?,
-                   reactions: [(emoji: String, count: Int, mine: Bool)], width: CGFloat) {
+                   reactions: [(emoji: String, count: Int, mine: Bool)], width: CGFloat,
+                   postPreview: MessagePostPreview? = nil, useFullPostCard: Bool = false) {
         widthConstraint.constant = width
         NSLayoutConstraint.deactivate(incoming + outgoing)
         NSLayoutConstraint.activate(isOut ? outgoing : incoming)
@@ -280,11 +465,61 @@ final class MessageCell: UICollectionViewCell {
 
         bubble.backgroundColor = isOut ? OVKUI.primary : OVKUI.card
 
-        if let (imageURL, caption) = messageImageURL(in: text) {
+        if let wallPost = messageWallPost(in: text) {
+            currentPostCardURL = wallPost.url
+            // Реальное фото поста — ВСЕГДА как обычное фото-сообщение (photoSize, тап во весь
+            // экран), независимо от тумблера компакт/развёрнуто: тот выбор влияет только на
+            // посты без фото (см. postThumbIsRealPhoto/postCardFullPhotoMode выше).
+            let hasRealPhoto = postPreview?.thumbURL != nil
+            postThumbIsRealPhoto = hasRealPhoto
+            let mode = hasRealPhoto ? postCardFullPhotoMode : (useFullPostCard ? postCardFullMode : postCardCompactMode)
+
+            // Реальное фото вписываем в бокс (photoSize × postPhotoMaxHeight), стараясь
+            // сохранить реальные пропорции (см. Photo.aspectRatio в PostRow) — но сервер
+            // отдаёт width/height не для каждого фото (см. гочи в CLAUDE.md), и тогда ratio
+            // молча берётся дефолтным (1.4), который может не совпасть с реальным фото.
+            // .scaleAspectFit НИКОГДА не обрезает картинку, даже если бокс посчитан неточно
+            // (в худшем случае — пустые поля по бокам, а не срезанный край) — это и есть фикс:
+            // раньше здесь стоял .scaleAspectFill, кадрировавший под неверно угаданный бокс.
+            var photoBox = CGSize(width: Self.photoSize, height: Self.photoSize)
+            if hasRealPhoto {
+                postThumbView.contentMode = .scaleAspectFit
+                let ratio = postPreview?.thumbAspectRatio ?? 1.4
+                photoBox = ratio >= Self.photoSize / Self.postPhotoMaxHeight
+                    ? CGSize(width: Self.photoSize, height: Self.photoSize / ratio)
+                    : CGSize(width: Self.postPhotoMaxHeight * ratio, height: Self.postPhotoMaxHeight)
+                postThumbPhotoWidthConstraint.constant = photoBox.width
+                postThumbPhotoHeightConstraint.constant = photoBox.height
+            } else {
+                postThumbView.contentMode = .scaleAspectFill
+            }
+
+            NSLayoutConstraint.deactivate(activeContentMode)
+            NSLayoutConstraint.activate(mode)
+            activeContentMode = mode
+            postCard.isHidden = false
+            photoImageView.isHidden = true
+            textView.isHidden = true
+            cancelPhotoLoad()
+
+            postCard.backgroundColor = isOut ? UIColor.white.withAlphaComponent(0.14) : UIColor.black.withAlphaComponent(0.05)
+            postAccentBar.isHidden = !(hasRealPhoto || useFullPostCard)
+            postAccentBar.backgroundColor = isOut ? UIColor.white.withAlphaComponent(0.6) : OVKUI.link
+            postAuthorLabel.textColor = isOut ? .white : OVKUI.textPrimary
+            postSnippetLabel.textColor = isOut ? UIColor.white.withAlphaComponent(0.85) : OVKUI.textSecondary
+            postSnippetLabel.numberOfLines = useFullPostCard ? 4 : 2
+            postAuthorLabel.text = postPreview?.authorName ?? "Запись"
+            postSnippetLabel.text = postPreview.map { $0.snippet.isEmpty ? "Запись" : $0.snippet } ?? ""
+            let thumbSize = hasRealPhoto ? max(photoBox.width, photoBox.height) : (useFullPostCard ? Self.postFullThumbSize : Self.postCompactThumbSize)
+            loadPostThumb(postPreview?.thumbURL ?? postPreview?.authorAvatarURL, maxPixel: thumbSize * UIScreen.main.scale)
+        } else if let (imageURL, caption) = messageImageURL(in: text) {
             let mode = caption.isEmpty ? photoMode : photoCaptionMode
             NSLayoutConstraint.deactivate(activeContentMode)
             NSLayoutConstraint.activate(mode)
             activeContentMode = mode
+            postCard.isHidden = true
+            postAccentBar.isHidden = true
+            cancelPostThumbLoad()
             photoImageView.isHidden = false
             loadPhoto(imageURL)
             textView.isHidden = caption.isEmpty
@@ -293,6 +528,9 @@ final class MessageCell: UICollectionViewCell {
             NSLayoutConstraint.deactivate(activeContentMode)
             NSLayoutConstraint.activate(textMode)
             activeContentMode = textMode
+            postCard.isHidden = true
+            postAccentBar.isHidden = true
+            cancelPostThumbLoad()
             photoImageView.isHidden = true
             textView.isHidden = false
             cancelPhotoLoad()
@@ -358,6 +596,22 @@ final class MessageCell: UICollectionViewCell {
         onOpenImage?(currentPhotoURL, photoImageView) // тот же полноэкранный просмотрщик, что в ленте
     }
 
+    /// Тап по карточке записи. Если тап попал на РЕАЛЬНОЕ фото поста — открываем его во весь
+    /// экран (как обычное фото-сообщение), а не пост: одного recognizer на весь postCard
+    /// достаточно, различаем по координате тапа, не заводя отдельный recognizer на тумбнейл
+    /// (который иначе конфликтовал бы с этим же в режиме без фото).
+    @objc private func postCardTapped(_ gr: UITapGestureRecognizer) {
+        if postThumbIsRealPhoto, let currentPostThumbURL {
+            let point = gr.location(in: postCard)
+            if postThumbView.frame.contains(point) {
+                onOpenImage?(currentPostThumbURL, postThumbView)
+                return
+            }
+        }
+        guard let currentPostCardURL else { return }
+        onOpenURL?(currentPostCardURL)
+    }
+
     /// Текст с кликабельными ссылками/упоминаниями (общая линкификация с лентой) — общий
     /// путь для обычного текстового сообщения и подписи под фото-сообщением.
     private func applyText(_ text: String, isOut: Bool) {
@@ -398,6 +652,35 @@ final class MessageCell: UICollectionViewCell {
         photoLoadTask = nil
         currentPhotoURL = nil
         photoImageView.image = nil
+    }
+
+    /// Тот же конвейер, что loadPhoto — просто грузит в тумбнейл карточки записи.
+    /// `url` — фото поста или (фолбэк) аватар автора; nil, пока превью не резолвнулось.
+    private func loadPostThumb(_ url: URL?, maxPixel: CGFloat) {
+        guard let url else { cancelPostThumbLoad(); return }
+        guard currentPostThumbURL != url else { return }
+        currentPostThumbURL = url
+        postThumbView.image = nil
+        postThumbLoadTask?.cancel()
+
+        if let cached = ImageCache.shared.image(for: url, maxPixelSize: maxPixel) {
+            postThumbView.image = cached
+            return
+        }
+        postThumbLoadTask = Task { @MainActor [weak self] in
+            guard let data = try? await URLSession.shared.data(from: url).0, !Task.isCancelled else { return }
+            guard let img = await ImagePipeline.downsample(data: data, maxPixelSize: maxPixel), !Task.isCancelled else { return }
+            ImageCache.shared.insert(img, for: url, maxPixelSize: maxPixel)
+            guard let self, self.currentPostThumbURL == url else { return }
+            self.postThumbView.image = img
+        }
+    }
+
+    private func cancelPostThumbLoad() {
+        postThumbLoadTask?.cancel()
+        postThumbLoadTask = nil
+        currentPostThumbURL = nil
+        postThumbView.image = nil
     }
 
     private func makeChip(_ group: (emoji: String, count: Int, mine: Bool)) -> UIButton {
