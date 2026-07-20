@@ -6,7 +6,7 @@ struct FriendsTabView: View {
     @EnvironmentObject private var settings: AppSettings
     /// Видна ли вкладка сейчас (активна ли она в таб-баре).
     /// Используется чтобы ставить/паузить фоновый таймер онлайн-статусов.
-    var isActive: Binding<Bool>
+    let isActive: Bool
     /// Идентификатор выбранного профиля для программной навигации.
     /// Отвязывает стек навигации от содержимого списка (ForEach), чтобы смена
     /// `searchResults` из-за автокоррекции поиска не «убивала» открытый профиль.
@@ -34,10 +34,11 @@ struct FriendsTabView: View {
             }
             // Фоновый таймер онлайн-статусов: раз в ~2.5 мин, только пока вкладка активна.
             // При уходе с вкладки (isActive=false) SwiftUI отменяет этот .task.
-            .task(id: isActive.wrappedValue) {
-                guard isActive.wrappedValue else { return }
+            .task(id: isActive) {
+                guard isActive else { return }
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 150 * 1_000_000_000)
+                    guard !Task.isCancelled else { return }
                     await model.refreshOnlineStatus(settings: settings)
                 }
             }

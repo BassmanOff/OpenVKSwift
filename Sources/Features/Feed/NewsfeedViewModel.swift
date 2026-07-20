@@ -21,7 +21,8 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
 
     private func startCountsPolling(settings: AppSettings) {
         guard countsPollTimer == nil else { return }
-        countsPollTimer = Timer.publish(every: 60, on: .main, in: .common)
+        // .default откладывает обновление счётчиков, пока List обрабатывает жест прокрутки.
+        countsPollTimer = Timer.publish(every: 60, on: .main, in: .default)
             .autoconnect()
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -42,7 +43,9 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
         var byID: [String: Post] = [:]
         for p in res.items { byID[p.id] = p }
         guard !byID.isEmpty else { return }
-        items = items.map { byID[$0.id] ?? $0 }
+        let refreshed = items.map { byID[$0.id] ?? $0 }
+        guard refreshed != items else { return }
+        items = refreshed
         persistCounts(byID)
     }
 
@@ -105,12 +108,14 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
     }
 
     override func mergeAuthors(from response: Response) {
+        var merged = authors
         for u in response.profiles ?? [] {
-            authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
+            merged[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
         }
         for g in response.groups ?? [] {
-            authors[-g.groupID] = WallViewModel.Author(name: g.name, avatar: g.avatarURL)
+            merged[-g.groupID] = WallViewModel.Author(name: g.name, avatar: g.avatarURL)
         }
+        if merged != authors { authors = merged }
     }
 
     override func items(from response: Response) -> [Post] {

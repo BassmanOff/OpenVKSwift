@@ -40,7 +40,6 @@ struct NewsfeedView: View {
                     } label: {
                         Image(systemName: "bell")
                             .overlay(alignment: .topTrailing) {
-                                let _ = print("[UI] \(debugNow()) колокольчик рисует бейдж unread=\(activity.unreadCount)")
                                 if activity.unreadCount > 0 {
                                     Text(activity.unreadCount > 99 ? "99+" : "\(activity.unreadCount)")
                                         .font(.system(size: 9, weight: .bold))

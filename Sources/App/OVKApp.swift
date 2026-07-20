@@ -22,12 +22,12 @@ struct OVKApp: App {
             diskCapacity: 200 * 1024 * 1024      // 200 МБ
         )
 
-        // Один и тот же облик навбара во всех состояниях скролла.
-        // Иначе на iOS 15 переход scrollEdge↔standard анимирует прозрачность/высоту,
-        // и кнопки с заголовком «прыгают» (Профиль, Музыка, Новости).
+        // Одно и то же лёгкое стекло во всех состояниях скролла. Одинаковые standard и
+        // scrollEdge appearance не дают бару менять прозрачность/высоту на iOS 15.
         let nav = UINavigationBarAppearance()
-        nav.configureWithOpaqueBackground()
-        nav.backgroundColor = .systemBackground
+        nav.configureWithTransparentBackground()
+        nav.backgroundEffect = UIBlurEffect(style: .extraLight)
+        nav.shadowColor = UIColor.separator.withAlphaComponent(0.35)
         UINavigationBar.appearance().standardAppearance = nav
         UINavigationBar.appearance().scrollEdgeAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav

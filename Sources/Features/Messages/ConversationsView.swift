@@ -317,6 +317,7 @@ final class ConversationsViewModel: ObservableObject {
 struct ConversationsView: View {
     /// Модель живёт в MainTabView — счётчик непрочитанных нужен и таб-бару.
     @ObservedObject var model: ConversationsViewModel
+    let isActive: Bool
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var longPoll: LongPollService
     /// Открытый диалог (программная навигация — надёжнее NavigationLink в строках на iOS 15).
@@ -392,11 +393,16 @@ struct ConversationsView: View {
                 }
                 .task {
                     await model.loadIfNeeded(settings: settings)
+                }
+                .task(id: isActive) {
+                    guard isActive else { return }
                     // Свои сообщения, отправленные с других устройств (веб), НЕ дают
                     // LongPoll-событий (сервер шлёт событие только ПОЛУЧАТЕЛЮ) —
-                    // добираем их периодическим тихим обновлением списка.
+                    // добираем их периодическим тихим обновлением списка, только пока
+                    // вкладка видима. Смена вкладки отменяет этот task.
                     while !Task.isCancelled {
                         try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                        guard !Task.isCancelled else { return }
                         await model.load(settings: settings)
                     }
                 }
