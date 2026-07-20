@@ -128,8 +128,8 @@ traits, and label fit on an iPhone SE-width screen.
 
 - [x] Keep posts full-width and opaque; do not introduce floating cards or per-post blur.
 - [x] Use a lighter rhythm between posts: narrow gray separation plus crisp hairlines.
-- [x] Add a subtle hairline above the action row.
-- [x] Use regular-weight outline action icons and blue active states.
+- [x] Keep the action row borderless, without a separator above it.
+- [x] Use regular-weight action icons and a filled VK-blue heart for the active like state.
 - [x] Standardize avatar, media, poll, and repost corner radii.
 - [x] Flatten polls and replace oversized modern filled actions with compact blue or
   hairline actions.

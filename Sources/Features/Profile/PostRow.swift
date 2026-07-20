@@ -245,7 +245,7 @@ struct PostRow: View {
             // удержание >0.4с — только long-press, тап при этом НЕ срабатывает).
             // Не Button + .simultaneousGesture (оба срабатывали разом: лайк И список)
             // и не LongPress.exclusively(before: Tap) (тап-лайк проглатывался).
-            Label("\(likes.count(post))", systemImage: "heart")
+            Label("\(likes.count(post))", systemImage: likes.isLiked(post) ? "heart.fill" : "heart")
                 .foregroundColor(likes.isLiked(post) ? OVK.Palette.primary : OVK.Palette.textSecondary)
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -273,8 +273,7 @@ struct PostRow: View {
             Spacer()
         }
         .font(.system(size: 15, weight: .regular))
-        .padding(.top, 8)
-        .overlay(OVKHairline(), alignment: .top)
+        .padding(.top, 2)
     }
 
     private static let formatter: DateFormatter = {
