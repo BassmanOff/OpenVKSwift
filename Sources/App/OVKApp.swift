@@ -27,15 +27,17 @@ struct OVKApp: App {
         let nav = UINavigationBarAppearance()
         nav.configureWithTransparentBackground()
         nav.backgroundEffect = UIBlurEffect(style: .extraLight)
-        nav.shadowColor = UIColor.separator.withAlphaComponent(0.35)
+        nav.shadowColor = UIColor(OVK.Palette.separator)
         UINavigationBar.appearance().standardAppearance = nav
         UINavigationBar.appearance().scrollEdgeAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav
+        UINavigationBar.appearance().tintColor = UIColor(OVK.Palette.primary)
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
+                .tint(OVK.Palette.primary)
                 .environmentObject(settings)
                 .environmentObject(player)
                 .environmentObject(downloads)

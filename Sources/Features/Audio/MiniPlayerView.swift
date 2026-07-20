@@ -35,10 +35,10 @@ struct MiniPlayerView: View {
                     Button { player.next() } label: { Image(systemName: "forward.fill") }
                 }
                 .foregroundColor(OVK.Palette.primary)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+                .padding(.horizontal, OVK.Metrics.contentInset)
+                .padding(.vertical, OVK.Metrics.sectionSpacing)
             }
-            .background(LightGlassBackground().overlay(Divider(), alignment: .top))
+            .background(LightGlassBackground().overlay(OVKHairline(), alignment: .top))
         }
     }
 }

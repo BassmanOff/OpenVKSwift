@@ -44,7 +44,7 @@ final class AppSettings: ObservableObject {
     @Published var messagePostFullCard: Bool {
         didSet { defaults.set(messagePostFullCard, forKey: postCardKey) }
     }
-    /// Параллельный экран плеера в стиле VK 7–8. ВЫКЛ по умолчанию.
+    /// Экран плеера в стиле VK 7–8. ВКЛ по умолчанию; явный выбор пользователя сохраняется.
     @Published var useNewPlayer: Bool {
         didSet { defaults.set(useNewPlayer, forKey: newPlayerKey) }
     }
@@ -99,7 +99,7 @@ final class AppSettings: ObservableObject {
         enableCustomReactions = defaults.object(forKey: reactionsKey) as? Bool ?? true
         countArchivedUnread = defaults.object(forKey: archivedUnreadKey) as? Bool ?? true
         messagePostFullCard = defaults.object(forKey: postCardKey) as? Bool ?? false
-        useNewPlayer = defaults.object(forKey: newPlayerKey) as? Bool ?? false
+        useNewPlayer = defaults.object(forKey: newPlayerKey) as? Bool ?? true
     }
 
     var isLoggedIn: Bool { token != nil }

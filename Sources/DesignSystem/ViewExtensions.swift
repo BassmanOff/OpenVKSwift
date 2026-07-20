@@ -11,6 +11,16 @@ struct LightGlassBackground: UIViewRepresentable {
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
 }
 
+/// Единый разделитель толщиной в один физический пиксель.
+struct OVKHairline: View {
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        OVK.Palette.separator
+            .frame(height: 1 / displayScale)
+    }
+}
+
 /// Небольшая вьюха «ошибка + повторить» (переиспользуется в списках).
 struct ErrorRetry: View {
     let message: String

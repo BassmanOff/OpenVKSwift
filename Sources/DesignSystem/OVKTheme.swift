@@ -12,6 +12,15 @@ enum OVK {
         static let textSecondary  = Color(hex: 0x656A73)
         static let link           = Color(hex: 0x2A5885)
     }
+
+    /// Общая геометрия интерфейса: компактные поверхности — 4 pt, элементы управления — 6 pt.
+    enum Metrics {
+        static let contentInset: CGFloat = 16
+        static let sectionSpacing: CGFloat = 8
+        static let compactCornerRadius: CGFloat = 4
+        static let controlCornerRadius: CGFloat = 6
+        static let minimumTapSize: CGFloat = 44
+    }
 }
 
 extension Color {

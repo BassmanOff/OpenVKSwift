@@ -166,8 +166,8 @@ struct SettingsView: View {
                     Toggle("Кастомные реакции", isOn: $settings.enableCustomReactions)
                 }
 
-                Section(header: Text("Плеер (отладка)")) {
-                    Toggle("Новый плеер (в разработке)", isOn: $settings.useNewPlayer)
+                Section(header: Text("Плеер")) {
+                    Toggle("Плеер в стиле iOS 7", isOn: $settings.useNewPlayer)
                 }
 
                 Section(

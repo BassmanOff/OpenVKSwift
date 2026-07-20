@@ -269,8 +269,8 @@ struct MainTabView: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(OVK.Palette.card.overlay(Divider(), alignment: .top))
+        .padding(.vertical, OVK.Metrics.sectionSpacing)
+        .background(OVK.Palette.card.overlay(OVKHairline(), alignment: .top))
         .contentShape(Rectangle())
         .onTapGesture { showDraftComposer = true }
         .confirmationDialog("Удалить черновик?", isPresented: $confirmDraftDiscard, titleVisibility: .visible) {
@@ -290,7 +290,7 @@ struct MainTabView: View {
         .background(
             LightGlassBackground()
                 .ignoresSafeArea(edges: .bottom) // фон уходит под home-indicator
-                .overlay(Divider(), alignment: .top)
+                .overlay(OVKHairline(), alignment: .top)
         )
     }
 
@@ -332,6 +332,7 @@ struct MainTabView: View {
             }
             .foregroundColor(selection == tab ? OVK.Palette.primary : OVK.Palette.textSecondary)
             .frame(maxWidth: .infinity)
+            .frame(minHeight: OVK.Metrics.minimumTapSize)
             .padding(.bottom, 2)
             .contentShape(Rectangle())
         }
