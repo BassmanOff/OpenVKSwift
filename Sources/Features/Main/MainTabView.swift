@@ -34,20 +34,13 @@ struct MainTabView: View {
     @StateObject private var friendsTab = FriendsTabViewModel()
 
     var body: some View {
-        // Явная раскладка: контент → мини-плеер → таб-бар. Так музыка НИКОГДА не перекрывает
-        // ни меню, ни нижние панели разделов (например, вкладки в «Сообществах»).
-        VStack(spacing: 0) {
-            content
-            if player.current != nil {
-                MiniPlayerView(onExpand: { openPlayer() })
+        // safeAreaInset оставляет последний ряд доступным, но фон списка продолжает жить
+        // под полупрозрачным нижним хромом. Вложенные нижние панели разделов получают
+        // уменьшенную safe area и не перекрываются мини-плеером/таб-баром.
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                bottomRegion
             }
-            // Чип черновика поста — «свёрнутый композер» (как мини-приложения Telegram):
-            // виден, пока черновик существует; любой открытый композер-sheet накрывает его сам.
-            if drafts.draft != nil {
-                draftChip
-            }
-            tabBar
-        }
         // Новый плеер — ОВЕРЛЕЙ в той же иерархии (не модалка): BlurBackdrop внутри размывает
         // эти же вкладки, а свайп-вниз открывает их из-под плеера. Смонтирован ПОСТОЯННО и
         // уезжает за нижний край offset'ом — построение иерархии (блюр, три страницы,
@@ -182,6 +175,30 @@ struct MainTabView: View {
         }
     }
 
+    /// Чип черновика остаётся отдельной непрозрачной поверхностью, а мини-плеер и таб-бар
+    /// образуют один стеклянный tray с единственным UIVisualEffectView.
+    private var bottomRegion: some View {
+        VStack(spacing: 0) {
+            if drafts.draft != nil {
+                draftChip
+            }
+            bottomGlassTray
+        }
+    }
+
+    private var bottomGlassTray: some View {
+        VStack(spacing: 0) {
+            if player.current != nil {
+                MiniPlayerView(onExpand: { openPlayer() })
+                OVKHairline()
+            } else {
+                OVKHairline()
+            }
+            tabBar
+        }
+        .background(LightGlassBackground().ignoresSafeArea(edges: .bottom))
+    }
+
     /// Все вкладки смонтированы (сохраняем их состояние навигации); видна и активна одна.
     private var content: some View {
         MountedTabs(
@@ -263,13 +280,15 @@ struct MainTabView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(OVK.Palette.textSecondary)
-                    .padding(6) // зона нажатия побольше самой иконки
+                    .frame(width: OVK.Metrics.minimumTapSize,
+                           height: OVK.Metrics.minimumTapSize)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, OVK.Metrics.sectionSpacing)
+        .padding(.leading, 12)
+        .padding(.trailing, 4)
+        .frame(minHeight: OVK.Metrics.minimumTapSize)
         .background(OVK.Palette.card.overlay(OVKHairline(), alignment: .top))
         .contentShape(Rectangle())
         .onTapGesture { showDraftComposer = true }
@@ -286,12 +305,7 @@ struct MainTabView: View {
             tabButton(.music, "Музыка", "music.note")
             tabButton(.profile, "Профиль", "person.crop.circle")
         }
-        .padding(.top, 6)
-        .background(
-            LightGlassBackground()
-                .ignoresSafeArea(edges: .bottom) // фон уходит под home-indicator
-                .overlay(OVKHairline(), alignment: .top)
-        )
+        .frame(height: OVK.Metrics.tabBarHeight)
     }
 
     /// Новый плеер — оверлей, ему нужна анимация появления (.transition сработает только
@@ -332,8 +346,8 @@ struct MainTabView: View {
             }
             .foregroundColor(selection == tab ? OVK.Palette.primary : OVK.Palette.textSecondary)
             .frame(maxWidth: .infinity)
-            .frame(minHeight: OVK.Metrics.minimumTapSize)
-            .padding(.bottom, 2)
+            .frame(maxHeight: .infinity)
+            .padding(.top, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

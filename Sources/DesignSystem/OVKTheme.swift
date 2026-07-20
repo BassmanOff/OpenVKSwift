@@ -20,6 +20,8 @@ enum OVK {
         static let compactCornerRadius: CGFloat = 4
         static let controlCornerRadius: CGFloat = 6
         static let minimumTapSize: CGFloat = 44
+        static let miniPlayerHeight: CGFloat = 52
+        static let tabBarHeight: CGFloat = 49
     }
 }
 

@@ -3,7 +3,20 @@ import UIKit
 
 /// Лёгкое молочно-белое стекло в стиле экрана нового плеера.
 /// Не меняет effect при обновлениях SwiftUI — это важно для плавности прокрутки.
-struct LightGlassBackground: UIViewRepresentable {
+struct LightGlassBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        if reduceTransparency || contrast == .increased {
+            Color.white
+        } else {
+            LightGlassEffect()
+        }
+    }
+}
+
+private struct LightGlassEffect: UIViewRepresentable {
     func makeUIView(context: Context) -> UIVisualEffectView {
         UIVisualEffectView(effect: UIBlurEffect(style: .extraLight))
     }

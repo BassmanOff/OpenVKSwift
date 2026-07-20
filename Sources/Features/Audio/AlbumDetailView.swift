@@ -5,9 +5,10 @@ struct AlbumCover: View {
     let url: URL?
     var size: CGFloat
     var corner: CGFloat = 6
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        CachedImage(url: url) {
+        CachedImage(url: url, maxPixelSize: size * displayScale) {
             ZStack {
                 OVK.Palette.background
                 Image(systemName: "music.note.list")

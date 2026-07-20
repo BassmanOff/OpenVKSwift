@@ -70,23 +70,23 @@ Acceptance criteria:
 - Native and custom controls use the same primary blue.
 - The project builds without new warnings.
 
-### 2. Bottom chrome and mini-player
+### 2. Bottom chrome and mini-player — implemented locally
 
-- [ ] Make the mini-player and tab bar one continuous bottom glass tray.
-- [ ] Use a single outer blur with one hairline between mini-player and tab bar.
-- [ ] Avoid a doubled bright band where the two bars meet.
-- [ ] Keep the tab bar visually close to the native 49 pt layout, excluding the safe area.
-- [ ] Let scrolling content visually continue behind the glass while preserving safe
+- [x] Make the mini-player and tab bar one continuous bottom glass tray.
+- [x] Use a single outer blur with one hairline between mini-player and tab bar.
+- [x] Avoid a doubled bright band where the two bars meet.
+- [x] Keep the tab bar visually close to the native 49 pt layout, excluding the safe area.
+- [x] Let scrolling content visually continue behind the glass while preserving safe
   content insets, list scrolling, tab switching, and player swipe gestures.
-- [ ] Add a 40–44 pt square artwork tile to the mini-player with a 4 pt radius.
-- [ ] Use a black track title and blue artist, matching the full player.
-- [ ] Make artwork, labels, and unused panel space open the full player.
-- [ ] Keep visible transport controls uncluttered: play/pause and next on narrow screens;
-  retain previous only where space permits.
-- [ ] Move Stop out of the leading `x` position into a secondary action.
-- [ ] Give every mini-player control a 44 pt hit target.
-- [ ] Replace the OS-dependent progress control appearance with a stable thin blue line.
-- [ ] Keep Reduce Transparency and Increase Contrast readable.
+- [x] Add a 40–44 pt square artwork tile to the mini-player with a 4 pt radius.
+- [x] Use a black track title and blue artist, matching the full player.
+- [x] Make artwork, labels, and unused panel space open the full player.
+- [x] Keep visible transport controls uncluttered: play/pause, next, and More; Previous
+  remains available in the full player instead of adding width heuristics on iOS 15.
+- [x] Move Stop out of the leading `x` position into a secondary action.
+- [x] Give every mini-player control a 44 pt hit target.
+- [x] Replace the OS-dependent progress control appearance with a stable thin blue line.
+- [x] Keep Reduce Transparency and Increase Contrast readable.
 
 Acceptance criteria:
 
@@ -95,6 +95,9 @@ Acceptance criteria:
 - The full player still opens and closes smoothly by tap and swipe.
 - Tab content is never hidden behind the mini-player or tab bar.
 - Only one bottom blur layer is active during normal use.
+
+Device validation still required: iPhone SE width, full-player swipe dismissal, Chat
+keyboard/input-bar positioning, and screens with their own nested bottom safe-area inset.
 
 ### 3. Shared search and scope controls
 
