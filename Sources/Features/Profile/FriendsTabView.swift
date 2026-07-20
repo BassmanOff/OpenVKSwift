@@ -14,23 +14,33 @@ struct FriendsTabView: View {
 
     var body: some View {
         NavigationView {
-            List {
-                if model.query.isEmpty {
-                    tabContent
-                } else {
-                    searchContent
+            VStack(spacing: 0) {
+                OVKSearchStrip(text: $model.query, prompt: "Поиск друзей")
+
+                List {
+                    if model.query.isEmpty {
+                        tabContent
+                    } else {
+                        searchContent
+                    }
                 }
+                .listStyle(.plain)
+                .refreshable { await model.reload(settings: settings) }
             }
-            .listStyle(.plain)
-            .searchable(text: $model.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск друзей")
+            .background(OVK.Palette.background.ignoresSafeArea())
             .navigationTitle("Друзья")
             .navigationBarTitleDisplayMode(.inline)
             .pushesGlobalLinks(tab: 2) // ссылки из друзей пушатся в стек этой вкладки
-            .refreshable { await model.reload(settings: settings) }
             .task { await model.loadIfNeeded(settings: settings) }
             .task(id: model.query) {
+                let query = model.query.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !query.isEmpty else {
+                    await model.searchGlobal("", settings: settings)
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 400_000_000) // дебаунс
-                if !model.query.isEmpty { await model.searchGlobal(model.query, settings: settings) }
+                guard !Task.isCancelled else { return }
+                await model.searchGlobal(query, settings: settings)
             }
             // Фоновый таймер онлайн-статусов: раз в ~2.5 мин, только пока вкладка активна.
             // При уходе с вкладки (isActive=false) SwiftUI отменяет этот .task.
@@ -102,13 +112,19 @@ struct FriendsTabView: View {
                 ForEach(local) { friendRow($0) }
             }
         }
-        Section("Глобальный поиск") {
-            if model.isSearching {
-                HStack { Spacer(); ProgressView(); Spacer() }.listRowSeparator(.hidden)
-            } else if model.searchResults.isEmpty && local.isEmpty {
+        Section {
+            if model.searchResults.isEmpty && local.isEmpty && !model.isSearching {
                 Text("Ничего не найдено").foregroundColor(OVK.Palette.textSecondary)
             } else {
                 ForEach(model.searchResults) { friendRow($0) }
+            }
+        } header: {
+            HStack {
+                Text("Глобальный поиск")
+                Spacer()
+                if model.isSearching {
+                    ProgressView().scaleEffect(0.75)
+                }
             }
         }
     }

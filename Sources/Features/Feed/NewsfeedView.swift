@@ -15,16 +15,18 @@ struct NewsfeedView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                Picker("", selection: Binding(
-                    get: { model.kind },
-                    set: { newKind in Task { await model.switchTo(newKind, settings: settings) } }
-                )) {
-                    Text("Моя лента").tag(NewsfeedViewModel.Kind.my)
-                    Text("Все записи").tag(NewsfeedViewModel.Kind.global)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+                OVKSegmentedControl(
+                    options: [
+                        (.my, "Моя лента"),
+                        (.global, "Все записи")
+                    ],
+                    selection: Binding(
+                        get: { model.kind },
+                        set: { newKind in
+                            Task { await model.switchTo(newKind, settings: settings) }
+                        }
+                    )
+                )
 
                 content
             }

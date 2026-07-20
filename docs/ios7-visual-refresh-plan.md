@@ -99,24 +99,28 @@ Acceptance criteria:
 Device validation still required: iPhone SE width, full-player swipe dismissal, Chat
 keyboard/input-bar positioning, and screens with their own nested bottom safe-area inset.
 
-### 3. Shared search and scope controls
+### 3. Shared search and scope controls — implemented locally
 
-- [ ] Build one small reusable iOS 7-style search strip.
-- [ ] Place it directly beneath the translucent navigation bar.
-- [ ] Use a pale field, compact radius, restrained placeholder, and bottom hairline.
-- [ ] Build one shared scope/segmented selector: approximately 30–32 pt tall,
+- [x] Build one small reusable iOS 7-style search strip.
+- [x] Place it directly beneath the translucent navigation bar.
+- [x] Use a pale field, compact radius, restrained placeholder, and bottom hairline.
+- [x] Build one shared scope/segmented selector: approximately 30–32 pt tall,
   thin blue outline, 4–6 pt radius, blue selected segment, and white selected text.
-- [ ] Replace modern system segmented pills in News and Music.
-- [ ] Replace modern navigation-bar search drawers in Friends and Music.
-- [ ] Preserve Music's primary library selector while showing search scope separately;
+- [x] Replace modern system segmented pills in News and Music.
+- [x] Replace modern navigation-bar search drawers in Friends and Music.
+- [x] Preserve Music's primary library selector while showing search scope separately;
   do not replace one selector with another in the same unexplained position.
-- [ ] Keep focus, keyboard dismissal, VoiceOver labels, and 44 pt outer hit targets correct.
+- [x] Keep focus, keyboard submission dismissal, VoiceOver labels, and 44 pt outer hit
+  targets correct in the implementation.
 
 Acceptance criteria:
 
 - News, Friends, and Music use the same search and scope grammar.
 - Controls do not change appearance across supported iOS versions.
 - Entering and leaving search does not cause list content to jump unexpectedly.
+
+Device validation still required: keyboard/focus behavior on iOS 15, VoiceOver selected
+traits, and label fit on an iPhone SE-width screen.
 
 ### 4. Primary tab refinement
 

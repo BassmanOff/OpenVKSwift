@@ -25,10 +25,28 @@ struct AudioListView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
+                OVKSearchStrip(text: $searchText, prompt: "Поиск треков и альбомов")
+
+                OVKSegmentedControl(
+                    options: [
+                        (.online, "Онлайн"),
+                        (.downloads, "Загрузки"),
+                        (.playlists, "Плейлисты")
+                    ],
+                    selection: $tab
+                )
+
                 if isSearching {
-                    searchSection
+                    OVKSegmentedControl(
+                        options: [
+                            (.tracks, "Треки"),
+                            (.albums, "Альбомы")
+                        ],
+                        selection: $scope
+                    )
+                    searchResultsSection
                 } else {
-                    librarySection
+                    libraryContent
                 }
             }
             .navigationTitle("Музыка")
@@ -51,11 +69,6 @@ struct AudioListView: View {
                 tab = .playlists       // назад из альбома пользователь попадёт в «Плейлисты»
                 routeAlbum = album
             }
-            .searchable(
-                text: $searchText,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Поиск треков и альбомов"
-            )
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if tab == .downloads && !isSearching && !downloads.downloaded.isEmpty {
@@ -90,22 +103,12 @@ struct AudioListView: View {
 
     // MARK: - Библиотека (Онлайн / Загрузки)
 
-    private var librarySection: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                Text("Онлайн").tag(Tab.online)
-                Text("Загрузки").tag(Tab.downloads)
-                Text("Плейлисты").tag(Tab.playlists)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-
-            switch tab {
-            case .online:    onlineContent
-            case .downloads: downloadsContent
-            case .playlists: playlistsContent
-            }
+    @ViewBuilder
+    private var libraryContent: some View {
+        switch tab {
+        case .online:    onlineContent
+        case .downloads: downloadsContent
+        case .playlists: playlistsContent
         }
     }
 
@@ -205,20 +208,11 @@ struct AudioListView: View {
 
     // MARK: - Поиск (Треки / Альбомы)
 
-    private var searchSection: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $scope) {
-                Text("Треки").tag(Scope.tracks)
-                Text("Альбомы").tag(Scope.albums)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-
-            switch scope {
-            case .tracks: searchTracks
-            case .albums: searchAlbums
-            }
+    @ViewBuilder
+    private var searchResultsSection: some View {
+        switch scope {
+        case .tracks: searchTracks
+        case .albums: searchAlbums
         }
     }
 
@@ -293,4 +287,3 @@ struct AudioListView: View {
         // withdrawn (снят по копирайту) — не играется нигде, тап игнорируем.
     }
 }
-
