@@ -2,7 +2,7 @@ import Foundation
 
 /// Одно уведомление из notifications.get: лайк / коммент / упоминание / репост / запись на стене.
 /// parent/feedback имеют РАЗНУЮ форму под каждый тип, поэтому декодим лениво (все поля опциональны).
-struct ActivityNotification: Decodable, Identifiable {
+struct ActivityNotification: Decodable, Identifiable, Equatable {
     let type: String?
     let date: Int
     let parent: NotifObject?
@@ -95,7 +95,7 @@ struct ActivityNotification: Decodable, Identifiable {
 }
 
 /// Универсальный объект parent/feedback уведомления — форма разная, все поля опциональны.
-struct NotifObject: Decodable {
+struct NotifObject: Decodable, Equatable {
     let id: Int?
     let fromID: Int?
     let toID: Int?
@@ -103,7 +103,7 @@ struct NotifObject: Decodable {
     let text: String?
     let items: [ItemFrom]?
 
-    struct ItemFrom: Decodable {
+    struct ItemFrom: Decodable, Equatable {
         let fromID: Int?
         enum CodingKeys: String, CodingKey { case fromID = "from_id" }
     }

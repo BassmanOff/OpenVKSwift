@@ -38,7 +38,7 @@ struct MiniPlayerView: View {
                 .padding(.horizontal)
                 .padding(.vertical, 8)
             }
-            .background(.regularMaterial)
+            .background(LightGlassBackground().overlay(Divider(), alignment: .top))
         }
     }
 }

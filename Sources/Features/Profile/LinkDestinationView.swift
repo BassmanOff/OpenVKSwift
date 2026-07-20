@@ -212,15 +212,9 @@ private struct CommunityLinkLoader: View {
     }
 
     private func load() async {
-        guard let token = settings.token else { failed = true; return }
-        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
-        do {
-            let items: [Community] = try await client.call(
-                "groups.getById",
-                params: ["group_id": String(groupID), "fields": "description,members_count,photo_200,photo_100,is_admin,is_member"]
-            )
-            if let first = items.first { community = first } else { failed = true }
-        } catch {
+        if let result = await ObjectResolver.shared.community(id: groupID, settings: settings) {
+            community = result
+        } else {
             failed = true
         }
     }
@@ -248,15 +242,9 @@ private struct PhotoLinkLoader: View {
     }
 
     private func load() async {
-        guard let token = settings.token else { failed = true; return }
-        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
-        do {
-            let items: [Photo] = try await client.call(
-                "photos.getById",
-                params: ["photos": "\(ownerID)_\(photoID)"]
-            )
-            if let first = items.first { photo = first } else { failed = true }
-        } catch {
+        if let result = await ObjectResolver.shared.photo(ownerID: ownerID, photoID: photoID, settings: settings) {
+            photo = result
+        } else {
             failed = true
         }
     }
@@ -300,15 +288,9 @@ private struct VideoLinkLoader: View {
     }
 
     private func load() async {
-        guard let token = settings.token else { failed = true; return }
-        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
-        do {
-            let items: [Video] = try await client.call(
-                "video.get",
-                params: ["videos": "\(ownerID)_\(videoID)"]
-            )
-            if let first = items.first { video = first } else { failed = true }
-        } catch {
+        if let result = await ObjectResolver.shared.video(ownerID: ownerID, videoID: videoID, settings: settings) {
+            video = result
+        } else {
             failed = true
         }
     }
@@ -336,15 +318,9 @@ private struct PlaylistLinkLoader: View {
     }
 
     private func load() async {
-        guard let token = settings.token else { failed = true; return }
-        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
-        do {
-            let result: Album = try await client.call(
-                "audio.getPlaylistById",
-                params: ["owner_id": String(ownerID), "playlist_id": String(id)]
-            )
+        if let result = await ObjectResolver.shared.playlist(ownerID: ownerID, id: id, settings: settings) {
             album = result
-        } catch {
+        } else {
             failed = true
         }
     }

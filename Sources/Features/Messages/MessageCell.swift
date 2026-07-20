@@ -49,7 +49,7 @@ func messageWallPost(in text: String) -> (url: URL, ownerID: Int, postID: Int)? 
     return (url, ownerID, postID)
 }
 
-/// Превью для карточки записи в ЛС — заполняется асинхронно (RepostCache.messagePreview),
+/// Превью для карточки записи в ЛС — заполняется асинхронно (MessagePostPreview.resolve),
 /// высота ячейки фиксирована ДО загрузки (postCardCompactMode/postCardFullMode), поэтому
 /// приход превью не меняет layout, только содержимое уже отведённых мест.
 struct MessagePostPreview {
@@ -60,6 +60,34 @@ struct MessagePostPreview {
     /// в квадрат, а показывала целиком, как PostRow делает в ленте.
     let thumbAspectRatio: CGFloat?
     let snippet: String
+}
+
+extension MessagePostPreview {
+    /// Резолвит запись через ObjectResolver (extended=1 — нужны profiles/groups автора) и
+    /// строит превью карточки. Автор/сниппет — тонкая, специфичная для ЛС надстройка над
+    /// общим резолвером, поэтому живёт здесь, а не в самом ObjectResolver.
+    static func resolve(ownerID: Int, postID: Int, settings: AppSettings) async -> MessagePostPreview? {
+        guard let resolved = await ObjectResolver.shared.post(
+            ownerID: ownerID, postID: postID, extended: true, settings: settings
+        ) else { return nil }
+        let post = resolved.post
+        var authorName = "Пользователь"
+        var authorAvatar: URL?
+        if post.ownerID < 0 {
+            if let g = resolved.groups.first(where: { $0.groupID == -post.ownerID }) {
+                authorName = g.name
+                authorAvatar = g.avatarURL
+            }
+        } else if let u = resolved.profiles.first(where: { $0.id == post.fromID }) {
+            authorName = u.fullName
+            authorAvatar = u.avatarURL
+        }
+        return MessagePostPreview(
+            authorName: authorName, authorAvatarURL: authorAvatar,
+            thumbURL: post.photos.first?.bestURL, thumbAspectRatio: post.photos.first?.aspectRatio,
+            snippet: String(post.text.prefix(140))
+        )
+    }
 }
 
 /// Группировка реакций для чипов: эмодзи → (сколько, есть ли моя).

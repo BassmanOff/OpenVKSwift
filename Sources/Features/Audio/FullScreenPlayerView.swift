@@ -170,7 +170,7 @@ struct FullScreenPlayerView: View {
                 ProgressView()
             } else if track.isPlayable {
                 Button {
-                    Task { await downloads.download(track) }
+                    downloads.download(track)
                 } label: {
                     Label("Скачать", systemImage: "arrow.down.circle")
                         .font(.footnote)

@@ -40,6 +40,7 @@ struct RootView: View {
                 NewsfeedViewModel.clearCache()
                 ProfileViewModel.clearCache()
                 WallViewModel.clearCache()
+                ObjectResolver.shared.clear() // посты/фото/видео/сообщества/плейлисты — тоже личные данные
                 drafts.clear() // черновик поста — тоже личные данные
             }
         }

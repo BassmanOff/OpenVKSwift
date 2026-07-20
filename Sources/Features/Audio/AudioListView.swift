@@ -130,7 +130,7 @@ struct AudioListView: View {
             List(model.tracks) { track in
                 AudioRow(track: track)
                     .contentShape(Rectangle())
-                    .onTapGesture { tapTrack(track, in: model.tracks.filter { $0.isPlayable }, autoDownload: true) }
+                    .onTapGesture { tapTrack(track, in: model.tracks.filter { $0.isPlayable }, autoDownload: true, source: "Моя музыка") }
             }
             .listStyle(.plain)
             .refreshable { await model.load(settings: settings) }
@@ -158,7 +158,7 @@ struct AudioListView: View {
                 ForEach(downloads.downloaded) { track in
                     AudioRow(track: track, showAddToLibrary: false)
                         .contentShape(Rectangle())
-                        .onTapGesture { tapTrack(track, in: downloads.downloaded) }
+                        .onTapGesture { tapTrack(track, in: downloads.downloaded, source: "Загрузки") }
                 }
                 .onMove { downloads.move(from: $0, to: $1) }
                 .onDelete { offsets in
@@ -232,7 +232,7 @@ struct AudioListView: View {
             List(search.tracks) { track in
                 AudioRow(track: track, showAddedBadge: true)
                     .contentShape(Rectangle())
-                    .onTapGesture { tapTrack(track, in: search.tracks.filter { $0.isPlayable }) }
+                    .onTapGesture { tapTrack(track, in: search.tracks.filter { $0.isPlayable }, source: "Поиск") }
             }
             .listStyle(.plain)
         }
@@ -270,18 +270,18 @@ struct AudioListView: View {
 
     /// `autoDownload` — true только для вкладки «Онлайн» (Мои треки): там прослушанное
     /// докачивается для офлайна. Поиск/Загрузки такого не делают.
-    private func tapTrack(_ track: Audio, in list: [Audio], autoDownload: Bool = false) {
+    private func tapTrack(_ track: Audio, in list: [Audio], autoDownload: Bool = false, source: String? = nil) {
         if track.isPlayable || downloads.isDownloaded(track) {
             if player.current?.id == track.id {
                 player.togglePlayPause()
             } else {
-                player.play(track, in: list, autoDownload: autoDownload)
+                player.play(track, in: list, autoDownload: autoDownload, source: source)
             }
         } else if track.isProcessing {
             // Трек был в обработке — пробуем ещё раз (аналог «Всё равно воспроизвести» на сайте).
             Task {
                 if let fresh = await model.retry(track, settings: settings), fresh.isPlayable {
-                    player.play(fresh, in: model.tracks.filter { $0.isPlayable }, autoDownload: autoDownload)
+                    player.play(fresh, in: model.tracks.filter { $0.isPlayable }, autoDownload: autoDownload, source: source)
                 } else {
                     // Сервер так и не отдал источник — объясняем честно, raw оставляем для отправки.
                     model.diagnosticRaw = await model.fetchRaw(track, settings: settings)

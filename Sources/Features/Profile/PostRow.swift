@@ -9,7 +9,6 @@ struct PostRow: View {
     var onEdited: ((Post) -> Void)? = nil
     /// Отключает интерактивность кнопки комментариев (используется при встраивании PostRow в CommentsView).
     var commentTapEnabled: Bool = true
-    @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var likes: LikesManager
     @EnvironmentObject private var photoHero: PhotoHeroCoordinator
@@ -85,14 +84,14 @@ struct PostRow: View {
     }
 
     /// Если у репоста нет видео/аудио — возможно, их срезал API (copy_history содержит
-    /// только фото). Добираем оригинал одним запросом wall.getById (с кэшем).
+    /// только фото). Добираем оригинал одним запросом wall.getById (с кэшем в ObjectResolver).
     private func loadFullRepost() async {
         guard let repost = post.repost, fullRepost == nil,
               repost.videos.isEmpty, repost.audios.isEmpty,
               repost.postID != 0 else { return }
-        fullRepost = await RepostCache.shared.fullPost(
-            ownerID: repost.ownerID, postID: repost.postID, settings: settings
-        )
+        fullRepost = await ObjectResolver.shared.post(
+            ownerID: repost.ownerID, postID: repost.postID, extended: false, settings: settings
+        )?.post
     }
 
     // MARK: - Автор
@@ -288,86 +287,3 @@ struct PostRow: View {
         formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
     }
 }
-
-/// Кэш дозагруженных оригиналов репостов. API OpenVK кладёт в copy_history ТОЛЬКО фото
-/// (Wall.php перебирает вложения оригинала и берёт только Photo), поэтому видео/аудио
-/// репоста добираем прямым wall.getById — он отдаёт вложения полностью.
-@MainActor
-final class RepostCache {
-    static let shared = RepostCache()
-    private var cache: [String: Post] = [:]
-    private var failed: Set<String> = []
-
-    private var previewCache: [String: MessagePostPreview] = [:]
-    private var previewFailed: Set<String> = []
-
-    /// Стирает память-кэш дозагруженных репостов — отладка из настроек.
-    func clear() {
-        cache = [:]
-        failed = []
-        previewCache = [:]
-        previewFailed = []
-    }
-
-    /// Превью для карточки ссылки-на-запись в ЛС (не путать с fullPost — тому нужны только
-    /// вложения оригинала репоста, этому нужны ещё автор/группа из profiles/groups).
-    func messagePreview(ownerID: Int, postID: Int, settings: AppSettings) async -> MessagePostPreview? {
-        let key = "\(ownerID)_\(postID)"
-        if let hit = previewCache[key] { return hit }
-        if previewFailed.contains(key) { return nil }
-        guard let token = settings.token else { return nil }
-
-        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
-        do {
-            let res: WallResponse = try await client.call(
-                "wall.getById", params: ["posts": key, "extended": "1"]
-            )
-            guard let post = res.items.first else {
-                previewFailed.insert(key)
-                return nil
-            }
-            var authorName = "Пользователь"
-            var authorAvatar: URL?
-            if post.ownerID < 0 {
-                if let g = res.groups?.first(where: { $0.groupID == -post.ownerID }) {
-                    authorName = g.name
-                    authorAvatar = g.avatarURL
-                }
-            } else if let u = res.profiles?.first(where: { $0.id == post.fromID }) {
-                authorName = u.fullName
-                authorAvatar = u.avatarURL
-            }
-            let preview = MessagePostPreview(
-                authorName: authorName, authorAvatarURL: authorAvatar,
-                thumbURL: post.photos.first?.bestURL, thumbAspectRatio: post.photos.first?.aspectRatio,
-                snippet: String(post.text.prefix(140))
-            )
-            previewCache[key] = preview
-            return preview
-        } catch {
-            if !error.isCancellation { previewFailed.insert(key) }
-            return nil
-        }
-    }
-
-    func fullPost(ownerID: Int, postID: Int, settings: AppSettings) async -> Post? {
-        let key = "\(ownerID)_\(postID)"
-        if let hit = cache[key] { return hit }
-        if failed.contains(key) { return nil }
-        guard let token = settings.token else { return nil }
-
-        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
-        do {
-            let res: WallResponse = try await client.call("wall.getById", params: ["posts": key])
-            if let post = res.items.first {
-                cache[key] = post
-                return post
-            }
-            failed.insert(key)
-        } catch {
-            if !error.isCancellation { failed.insert(key) }
-        }
-        return nil
-    }
-}
-
