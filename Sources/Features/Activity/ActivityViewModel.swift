@@ -53,7 +53,8 @@ final class ActivityViewModel: ObservableObject {
     /// поэтому авто-обновление «Ответов» не пропадает при переоценке body вкладки.
     private func startPolling(settings: AppSettings) {
         guard pollTimer == nil else { return }
-        pollTimer = Timer.publish(every: 15, on: .main, in: .common)
+        // .default откладывает опрос, пока List обрабатывает жест прокрутки.
+        pollTimer = Timer.publish(every: 15, on: .main, in: .default)
             .autoconnect()
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -72,32 +73,39 @@ final class ActivityViewModel: ObservableObject {
         isReloading = true
         defer { isReloading = false }
 
-        isLoading = notifications.isEmpty && friendRequests.isEmpty
-        errorMessage = nil
-        defer { isLoading = false }
+        let shouldShowLoading = notifications.isEmpty && friendRequests.isEmpty
+        if isLoading != shouldShowLoading { isLoading = shouldShowLoading }
+        if errorMessage != nil { errorMessage = nil }
+        defer { if isLoading { isLoading = false } }
 
         // Уведомления и заявки в друзья — параллельно.
         async let notifsTask = fetchNotifications(client: client, offset: 0)
         async let requestsTask = fetchFriendRequests(client: client)
         let (notifs, requests) = await (notifsTask, requestsTask)
+        mergeAuthors(
+            profiles: (notifs?.profiles ?? []) + (requests ?? []),
+            groups: notifs?.groups
+        )
 
         if let notifs {
-            mergeAuthors(profiles: notifs.profiles, groups: notifs.groups)
-            notifications = notifs.items.filter { $0.type != nil }
+            let freshNotifications = notifs.items.filter { $0.type != nil }
+            if notifications != freshNotifications { notifications = freshNotifications }
             // ВАЖНО: watermark только ВПЕРЁД. Берём максимум с серверным last_viewed,
             // чтобы просмотренное не всплыло заново (при задержке серверной обработки markAsViewed).
-            lastViewed = max(lastViewed, notifs.lastViewed ?? 0)
+            let freshLastViewed = max(lastViewed, notifs.lastViewed ?? 0)
+            if lastViewed != freshLastViewed { lastViewed = freshLastViewed }
             offset = pageSize
-            canLoadMore = notifs.items.count >= pageSize
+            let hasMore = notifs.items.count >= pageSize
+            if canLoadMore != hasMore { canLoadMore = hasMore }
             // Баннеры + бейдж на иконке — ПОСЛЕ обновления списка/lastViewed,
             // чтобы unreadCount был актуальным.
             NotificationService.processActivity(notifs, canBanner: settings.notifyMessages && !isBellVisible, activityCount: unreadCount)
         } else if notifications.isEmpty {
-            errorMessage = lastFetchError ?? "Не удалось загрузить уведомления"
+            let message = lastFetchError ?? "Не удалось загрузить уведомления"
+            if errorMessage != message { errorMessage = message }
         }
         if let requests {
-            for u in requests { authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL) }
-            friendRequests = requests
+            if friendRequests != requests { friendRequests = requests }
         }
         print("[Notifications] \(debugNow()) reload готов: notifs=\(notifications.count), заявок=\(friendRequests.count), lastViewed=\(lastViewed), unread=\(unreadCount)")
     }
@@ -144,8 +152,10 @@ final class ActivityViewModel: ObservableObject {
     // MARK: - Private
 
     private func mergeAuthors(profiles: [User]?, groups: [Community]?) {
-        for u in profiles ?? [] { authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL) }
-        for g in groups ?? [] { authors[-g.groupID] = WallViewModel.Author(name: g.name, avatar: g.avatarURL) }
+        var merged = authors
+        for u in profiles ?? [] { merged[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL) }
+        for g in groups ?? [] { merged[-g.groupID] = WallViewModel.Author(name: g.name, avatar: g.avatarURL) }
+        if merged != authors { authors = merged }
     }
 
     /// Текст последней ошибки notifications.get (для показа пользователю вместо пустого экрана).

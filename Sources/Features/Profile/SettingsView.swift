@@ -28,7 +28,7 @@ final class DownloadAllViewModel: ObservableObject {
         var done = 0
         for track in pending {
             progress = "Скачивание \(done + 1) из \(pending.count)…"
-            await downloads.download(track)
+            await downloads.downloadAndWait(track)
             done += 1
         }
         progress = "Готово: скачано \(done)"
@@ -164,6 +164,10 @@ struct SettingsView: View {
                     footer: Text("Реакции реализованы через скрытые сообщения. Выключите, чтобы увидеть переписку как в веб-версии OpenVK — реакции станут обычными текстовыми сообщениями. Действует при следующем открытии диалога.")
                 ) {
                     Toggle("Кастомные реакции", isOn: $settings.enableCustomReactions)
+                }
+
+                Section(header: Text("Плеер (отладка)")) {
+                    Toggle("Новый плеер (в разработке)", isOn: $settings.useNewPlayer)
                 }
 
                 Section(
@@ -309,7 +313,7 @@ struct SettingsView: View {
             ChatViewModel.clearAllCaches()
             URLCache.shared.removeAllCachedResponses()
             ImageCache.shared.removeAll()
-            RepostCache.shared.clear()
+            ObjectResolver.shared.clear()
             NewsfeedViewModel.clearCache()
             ProfileViewModel.clearCache()
             WallViewModel.clearCache()

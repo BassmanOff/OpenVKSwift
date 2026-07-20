@@ -65,8 +65,9 @@ final class ChatScreenController: UIViewController {
     /// Шаблонная ячейка для замера высот — та же раскладка, что у живых ячеек.
     private let sizingCell = MessageCell(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
     /// Превью карточек ссылок-на-запись (wall123_456), по ключу "ownerID_postID" — резолвятся
-    /// асинхронно (RepostCache), высота карточки от них не зависит (см. MessageCell), поэтому
-    /// приход превью просто перерисовывает содержимое строки, а не меняет layout.
+    /// асинхронно (MessagePostPreview.resolve → ObjectResolver), высота карточки от них не
+    /// зависит (см. MessageCell), поэтому приход превью просто перерисовывает содержимое
+    /// строки, а не меняет layout.
     private var postPreviews: [String: MessagePostPreview] = [:]
     private var pendingPreviewKeys: Set<String> = []
     /// Компакт/развёрнутая карточка — тумблер в настройках; при его смене высоты карточек
@@ -522,7 +523,7 @@ final class ChatScreenController: UIViewController {
         pendingPreviewKeys.insert(key)
         Task { [weak self] in
             guard let self else { return }
-            let resolved = await RepostCache.shared.messagePreview(
+            let resolved = await MessagePostPreview.resolve(
                 ownerID: wallPost.ownerID, postID: wallPost.postID, settings: self.settings
             )
             self.pendingPreviewKeys.remove(key)

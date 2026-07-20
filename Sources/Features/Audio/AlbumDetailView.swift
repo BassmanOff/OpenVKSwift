@@ -116,7 +116,7 @@ struct AlbumDetailView: View {
                             if player.current?.id == track.id {
                                 player.togglePlayPause()
                             } else {
-                                player.play(track, in: model.tracks.filter { $0.isPlayable })
+                                player.play(track, in: model.tracks.filter { $0.isPlayable }, source: album.title)
                             }
                         }
                 }

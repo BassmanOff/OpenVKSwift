@@ -39,7 +39,7 @@ struct MainTabView: View {
         VStack(spacing: 0) {
             content
             if player.current != nil {
-                MiniPlayerView(onExpand: { showPlayer = true })
+                MiniPlayerView(onExpand: { openPlayer() })
             }
             // Чип черновика поста — «свёрнутый композер» (как мини-приложения Telegram):
             // виден, пока черновик существует; любой открытый композер-sheet накрывает его сам.
@@ -47,6 +47,16 @@ struct MainTabView: View {
                 draftChip
             }
             tabBar
+        }
+        // Новый плеер — ОВЕРЛЕЙ в той же иерархии (не модалка): BlurBackdrop внутри размывает
+        // эти же вкладки, а свайп-вниз открывает их из-под плеера. Смонтирован ПОСТОЯННО и
+        // уезжает за нижний край offset'ом — построение иерархии (блюр, три страницы,
+        // декод обложки) при первом открытии давало заметный лаг. См. VKPlayerView.
+        .overlay {
+            if settings.useNewPlayer {
+                VKPlayerView(isPresented: $showPlayer)
+                    .zIndex(10)
+            }
         }
         // ГЛОБАЛЬНЫЙ перехват ссылок OpenVK: override навешен НАД всеми вкладками → наследуется
         // КАЖДЫМ экраном (все вкладки И запушенные экраны, вкл. «Ответы»/ActivityView из тулбара).
@@ -58,7 +68,7 @@ struct MainTabView: View {
         })
         .environmentObject(linkRouter)
         .ignoresSafeArea(.keyboard, edges: .bottom) // таб-бар не «прыгает» с клавиатурой
-        .sheet(isPresented: $showPlayer) {
+        .sheet(isPresented: settings.useNewPlayer ? .constant(false) : $showPlayer) {
             FullScreenPlayerView()
         }
         .sheet(isPresented: $showDraftComposer) {
@@ -174,27 +184,57 @@ struct MainTabView: View {
 
     /// Все вкладки смонтированы (сохраняем их состояние навигации); видна и активна одна.
     private var content: some View {
-        ZStack {
-            NewsfeedView(activity: activity)
-                .opacity(selection == .feed ? 1 : 0)
-                .allowsHitTesting(selection == .feed)
-            ConversationsView(model: conversations)
+        MountedTabs(
+            selection: selection,
+            activity: activity,
+            conversations: conversations,
+            friends: friendsTab
+        )
+        .equatable()
+    }
+
+    /// Граница обновлений для пяти постоянно смонтированных вкладок. MainTabView слушает
+    /// глобальные модели (плеер, LongPoll, настройки, черновик), но их события не должны
+    /// заставлять SwiftUI заново обходить все скрытые NavigationView/List.
+    private struct MountedTabs: View, Equatable {
+        let selection: Tab
+        let activity: ActivityViewModel
+        let conversations: ConversationsViewModel
+        let friends: FriendsTabViewModel
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.selection == rhs.selection
+                && lhs.activity === rhs.activity
+                && lhs.conversations === rhs.conversations
+                && lhs.friends === rhs.friends
+        }
+
+        var body: some View {
+            ZStack {
+                NewsfeedView(activity: activity)
+                    .opacity(selection == .feed ? 1 : 0)
+                    .allowsHitTesting(selection == .feed)
+                ConversationsView(
+                    model: conversations,
+                    isActive: selection == .messages
+                )
                 .opacity(selection == .messages ? 1 : 0)
                 .allowsHitTesting(selection == .messages)
-            FriendsTabView(
-                model: friendsTab,
-                isActive: Binding(get: { selection == .friends }, set: { _ in })
-            )
+                FriendsTabView(
+                    model: friends,
+                    isActive: selection == .friends
+                )
                 .opacity(selection == .friends ? 1 : 0)
                 .allowsHitTesting(selection == .friends)
-            AudioListView()
-                .opacity(selection == .music ? 1 : 0)
-                .allowsHitTesting(selection == .music)
-            ProfileView()
-                .opacity(selection == .profile ? 1 : 0)
-                .allowsHitTesting(selection == .profile)
+                AudioListView()
+                    .opacity(selection == .music ? 1 : 0)
+                    .allowsHitTesting(selection == .music)
+                ProfileView()
+                    .opacity(selection == .profile ? 1 : 0)
+                    .allowsHitTesting(selection == .profile)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// «Свёрнутый» черновик поста: тап — продолжить редактирование, ✕ — удалить.
@@ -248,10 +288,20 @@ struct MainTabView: View {
         }
         .padding(.top, 6)
         .background(
-            OVK.Palette.card
+            LightGlassBackground()
                 .ignoresSafeArea(edges: .bottom) // фон уходит под home-indicator
                 .overlay(Divider(), alignment: .top)
         )
+    }
+
+    /// Новый плеер — оверлей, ему нужна анимация появления (.transition сработает только
+    /// внутри withAnimation). Старый — sheet, ему withAnimation безвредна.
+    private func openPlayer() {
+        if settings.useNewPlayer {
+            withAnimation(.spring(response: 0.42, dampingFraction: 1)) { showPlayer = true }
+        } else {
+            showPlayer = true
+        }
     }
 
     /// `badge` — число непрочитанных для вкладки (сообщения/активность); 0 = нет бейджа.

@@ -17,11 +17,12 @@ struct AudioRow: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var library: LibraryManager
     @State private var extraCover: URL?   // обложка из iTunes, если в OpenVK её нет
+    @State private var showUnavailableAlert = false
 
     private var isCurrent: Bool { player.current?.id == track.id }
     private var coverURL: URL? { track.coverURL ?? extraCover }
     /// Скачанный трек можно играть офлайн, даже если онлайн-url протух.
-    private var canPlay: Bool { track.isPlayable || downloads.isDownloaded(track) }
+    private var canPlay: Bool { player.isAvailable(track) }
 
     private var leadingIcon: String {
         if canPlay { return (isCurrent && player.isPlaying) ? "pause.circle.fill" : "play.circle.fill" }
@@ -113,6 +114,12 @@ struct AudioRow: View {
                 extraCover = await CoverArtService.shared.cover(artist: track.artist, title: track.title)
             }
         }
+        .onReceive(player.$unavailableTrack) { selected in
+            showUnavailableAlert = selected?.id == track.id
+        }
+        .unavailableAudioAlert(isPresented: $showUnavailableAlert) {
+            player.clearUnavailableTrack()
+        }
     }
 
     @ViewBuilder
@@ -168,7 +175,7 @@ struct AudioRow: View {
             ProgressView()
         } else {
             Button {
-                Task { await downloads.download(track) }
+                downloads.download(track)
             } label: {
                 Image(systemName: "arrow.down.circle").foregroundColor(OVK.Palette.textSecondary)
             }

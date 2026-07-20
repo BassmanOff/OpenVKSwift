@@ -5,6 +5,20 @@ import UIKit
 struct MediaAttachmentsView: View {
     let audios: [Audio]
     let videos: [Video]
+
+    @ViewBuilder
+    var body: some View {
+        // Держим ObservableObject-подписки за этой веткой: большинство постов без
+        // медиа не должны слушать каждое событие плеера/загрузок/библиотеки.
+        if !audios.isEmpty || !videos.isEmpty {
+            MediaAttachmentsContent(audios: audios, videos: videos)
+        }
+    }
+}
+
+private struct MediaAttachmentsContent: View {
+    let audios: [Audio]
+    let videos: [Video]
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: AudioDownloadManager
     @EnvironmentObject private var library: LibraryManager
@@ -13,32 +27,28 @@ struct MediaAttachmentsView: View {
 
     @ViewBuilder
     var body: some View {
-        if audios.isEmpty && videos.isEmpty {
-            EmptyView()
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(audios) { track in
-                    // Встроенное меню строки выключено: внутри ячейки List (пост в ленте)
-                    // SwiftUI вешает его на ВСЮ ячейку — long-press по любому месту поста
-                    // открывал меню трека. UIKit-взаимодействие держит его в рамке строки.
-                    // Тап — через Button (не onTapGesture): жест поверх UIKit-подложки
-                    // давал «мёртвые зоны» над текстом названия, кнопка бьёт по всей строке.
-                    Button { playTrack(track) } label: {
-                        AudioRow(track: track, showsContextMenu: false)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(RowScopedContextMenu { trackMenu(track) })
-                }
-                ForEach(videos) { video in
-                    videoThumb(video)
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(audios) { track in
+                // Встроенное меню строки выключено: внутри ячейки List (пост в ленте)
+                // SwiftUI вешает его на ВСЮ ячейку — long-press по любому месту поста
+                // открывал меню трека. UIKit-взаимодействие держит его в рамке строки.
+                // Тап — через Button (не onTapGesture): жест поверх UIKit-подложки
+                // давал «мёртвые зоны» над текстом названия, кнопка бьёт по всей строке.
+                Button { playTrack(track) } label: {
+                    AudioRow(track: track, showsContextMenu: false)
                         .contentShape(Rectangle())
-                        .onTapGesture { selectedVideo = video }
                 }
+                .buttonStyle(.plain)
+                .background(RowScopedContextMenu { trackMenu(track) })
             }
-            .fullScreenCover(item: $selectedVideo) { video in
-                VideoPlayerScreen(video: video)
+            ForEach(videos) { video in
+                videoThumb(video)
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedVideo = video }
             }
+        }
+        .fullScreenCover(item: $selectedVideo) { video in
+            VideoPlayerScreen(video: video)
         }
     }
 

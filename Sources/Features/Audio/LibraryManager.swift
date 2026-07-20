@@ -64,7 +64,7 @@ final class LibraryManager: ObservableObject {
                 toast = add ? "Добавлено в мою музыку" : "Удалено из моей музыки"
                 // Автозагрузка добавленного трека (если включено в настройках).
                 if add, settings.autoDownloadMyTracks, track.isPlayable {
-                    await downloads?.download(track)
+                    downloads?.download(track)
                 }
             } else {
                 // откат

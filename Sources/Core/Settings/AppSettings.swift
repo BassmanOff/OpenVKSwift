@@ -44,6 +44,10 @@ final class AppSettings: ObservableObject {
     @Published var messagePostFullCard: Bool {
         didSet { defaults.set(messagePostFullCard, forKey: postCardKey) }
     }
+    /// Параллельный экран плеера в стиле VK 7–8. ВЫКЛ по умолчанию.
+    @Published var useNewPlayer: Bool {
+        didSet { defaults.set(useNewPlayer, forKey: newPlayerKey) }
+    }
 
     /// id альбома «_Private(OVK_iOS)», куда дублируются фото из ЛС (у OpenVK нет вложений
     /// в личных сообщениях — шлём прямой линк на .jpeg из этого альбома). Создаётся при
@@ -75,6 +79,7 @@ final class AppSettings: ObservableObject {
     private let reactionsKey = "enable_custom_reactions"
     private let archivedUnreadKey = "count_archived_unread"
     private let postCardKey = "message_post_full_card"
+    private let newPlayerKey = "use_new_player"
     private let pmAlbumKey = "pm_photo_album_id"
     private let pmWarnKey = "pm_photo_warned"
 
@@ -94,6 +99,7 @@ final class AppSettings: ObservableObject {
         enableCustomReactions = defaults.object(forKey: reactionsKey) as? Bool ?? true
         countArchivedUnread = defaults.object(forKey: archivedUnreadKey) as? Bool ?? true
         messagePostFullCard = defaults.object(forKey: postCardKey) as? Bool ?? false
+        useNewPlayer = defaults.object(forKey: newPlayerKey) as? Bool ?? false
     }
 
     var isLoggedIn: Bool { token != nil }

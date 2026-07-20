@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 final class WallViewModel: CachedListViewModel<WallViewModel.WallResponse, Post, Int> {
 
-    struct Author: Codable { let name: String; let avatar: URL? } // Codable — для кэша диалогов
+    struct Author: Codable, Equatable { let name: String; let avatar: URL? } // Codable — для кэша диалогов
 
     override var cursorParamName: String { "offset" }
     var ownerID: Int
@@ -34,12 +34,14 @@ final class WallViewModel: CachedListViewModel<WallViewModel.WallResponse, Post,
     }
 
     override func mergeAuthors(from response: WallResponse) {
+        var merged = authors
         for u in response.profiles ?? [] {
-            authors[u.id] = Author(name: u.fullName, avatar: u.avatarURL)
+            merged[u.id] = Author(name: u.fullName, avatar: u.avatarURL)
         }
         for g in response.groups ?? [] {
-            authors[-g.groupID] = Author(name: g.name, avatar: g.avatarURL)
+            merged[-g.groupID] = Author(name: g.name, avatar: g.avatarURL)
         }
+        if merged != authors { authors = merged }
     }
 
     override func items(from response: WallResponse) -> [Post] {

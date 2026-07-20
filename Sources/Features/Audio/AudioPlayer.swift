@@ -19,6 +19,9 @@ final class AudioPlayer: ObservableObject {
     enum RepeatMode { case off, all, one }
 
     @Published private(set) var queue: [Audio] = []
+    /// Откуда набрана очередь (альбом, «Моя музыка», «Поиск»…) — подзаголовок страницы
+    /// очереди в плеере. nil = очередь без имени (одиночный трек), подзаголовок скрыт.
+    @Published private(set) var queueSource: String?
     @Published private(set) var currentIndex: Int?
     @Published private(set) var isPlaying = false
     @Published private(set) var isShuffled = false
@@ -26,6 +29,8 @@ final class AudioPlayer: ObservableObject {
     /// Запрос перехода к альбому играющего трека: плеер выставляет его (кнопка «К альбому»),
     /// MainTabView переключается на вкладку «Музыка», AudioListView открывает альбом.
     @Published var pendingAlbum: Album?
+    /// Трек, который пользователь выбрал явно, но сервер не разрешил воспроизведение.
+    @Published private(set) var unavailableTrack: Audio?
     /// Позиция/длительность — отдельный наблюдаемый объект (см. PlaybackClock).
     let clock = PlaybackClock()
 
@@ -47,6 +52,14 @@ final class AudioPlayer: ObservableObject {
         return queue[i]
     }
 
+    func isAvailable(_ audio: Audio) -> Bool {
+        audio.isPlayable || downloads?.isDownloaded(audio) == true
+    }
+
+    func clearUnavailableTrack() {
+        unavailableTrack = nil
+    }
+
     init() {
         configureSession()
         setupRemoteCommands()
@@ -65,12 +78,13 @@ final class AudioPlayer: ObservableObject {
     /// `autoDownload` — разрешить автозагрузку при прослушивании для ЭТОЙ очереди.
     /// true только из вкладки «Онлайн» (Мои треки); из альбомов, поиска, ленты — false,
     /// чтобы случайное прослушивание не забивало «Загрузки».
-    func play(_ audio: Audio, in list: [Audio], autoDownload: Bool = false) {
+    func play(_ audio: Audio, in list: [Audio], autoDownload: Bool = false, source: String? = nil) {
         queue = list
+        queueSource = source
         autoDownloadCurrentQueue = autoDownload
         currentIndex = list.firstIndex(where: { $0.id == audio.id }) ?? 0
         if isShuffled { applyShuffleKeepingCurrent() }
-        startCurrent()
+        startCurrent(reportUnavailable: true)
     }
 
     /// Вкл/выкл перемешивание. Текущий трек остаётся играть, остальные перемешиваются/восстанавливаются.
@@ -135,7 +149,7 @@ final class AudioPlayer: ObservableObject {
     func play(at index: Int) {
         guard queue.indices.contains(index) else { return }
         currentIndex = index
-        startCurrent()
+        startCurrent(reportUnavailable: true)
     }
 
     /// Удалить треки из очереди. Если удалён текущий — переходим к соседнему или останавливаемся.
@@ -175,6 +189,7 @@ final class AudioPlayer: ObservableObject {
         clock.duration = 0
         currentIndex = nil
         queue = []
+        queueSource = nil
         updateNowPlaying()
     }
 
@@ -244,17 +259,21 @@ final class AudioPlayer: ObservableObject {
 
     // MARK: - Private
 
-    private func startCurrent() {
+    private func startCurrent(reportUnavailable: Bool = false) {
         guard let audio = current else { return }
         let local = downloads?.localURL(for: audio)
         let source = local ?? audio.playbackURL
-        guard let url = source else { return }
+        guard let url = source else {
+            if reportUnavailable { unavailableTrack = audio }
+            skipUnavailableTrack()
+            return
+        }
 
         // Автозагрузка при прослушивании: только для очереди из вкладки «Онлайн»
         // (autoDownloadCurrentQueue), если играем из сети и включено в настройках.
         // Альбомы/поиск/лента такого не делают — не забиваем «Загрузки».
         if downloadOnPlay, autoDownloadCurrentQueue, local == nil, audio.isPlayable {
-            Task { await downloads?.download(audio) }
+            downloads?.download(audio)
         }
 
         // Регистрируем прослушивание на сервере (+статус «слушаю») — один раз на старт трека.
@@ -276,16 +295,55 @@ final class AudioPlayer: ObservableObject {
         updateNowPlaying()
     }
 
+    /// Пропускает недоступные записи без зацикливания, даже при повторе всей очереди.
+    private func skipUnavailableTrack() {
+        guard let start = currentIndex, !queue.isEmpty else {
+            clearPlaybackKeepingQueue()
+            return
+        }
+        var index = start
+        for _ in queue.indices {
+            index += 1
+            if index == queue.count {
+                guard repeatMode == .all else { break }
+                index = 0
+            }
+            if isAvailable(queue[index]) {
+                currentIndex = index
+                startCurrent()
+                return
+            }
+        }
+        clearPlaybackKeepingQueue()
+    }
+
+    private func clearPlaybackKeepingQueue() {
+        player?.pause()
+        removeObservers()
+        player = nil
+        isPlaying = false
+        currentIndex = nil
+        clock.currentTime = 0
+        clock.duration = 0
+        updateNowPlaying()
+    }
+
     private func addObservers(for item: AVPlayerItem, player avPlayer: AVPlayer) {
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
-            self.clock.currentTime = time.seconds
-            if let itemDuration = self.player?.currentItem?.duration.seconds,
-               itemDuration.isFinite, itemDuration > 0 {
-                self.clock.duration = itemDuration
+            let currentTime = time.seconds
+            if currentTime.isFinite, self.clock.currentTime != currentTime {
+                self.clock.currentTime = currentTime
             }
-            self.updateNowPlaying()
+            if let itemDuration = self.player?.currentItem?.duration.seconds,
+               itemDuration.isFinite, itemDuration > 0,
+               self.clock.duration != itemDuration {
+                self.clock.duration = itemDuration
+                // Elapsed time is extrapolated from playback rate by MediaPlayer; update
+                // the dictionary only when duration itself becomes known or changes.
+                self.updateNowPlaying()
+            }
         }
 
         endObserver = NotificationCenter.default.addObserver(
@@ -394,7 +452,7 @@ final class AudioPlayer: ObservableObject {
             }
             guard let url,
                   let data = try? await URLSession.shared.data(from: url).0,
-                  let image = UIImage(data: data),
+                  let image = await ImagePipeline.downsample(data: data, maxPixelSize: 1024),
                   current?.id == audio.id else { return }
             currentArtwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             updateNowPlaying()

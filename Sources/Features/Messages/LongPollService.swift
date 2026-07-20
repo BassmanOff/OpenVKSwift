@@ -28,7 +28,7 @@ final class LongPollService: ObservableObject {
     let newMessage = PassthroughSubject<LPNewMessage, Never>()
 
     /// Время последнего успешно завершённого цикла (любой ответ сервера, включая пустой таймаут).
-    @Published private(set) var lastCycleAt: Date?
+    private(set) var lastCycleAt: Date?
 
     /// LongPoll жив (цикл завершался недавно) — резервные опросы можно прореживать.
     var isHealthy: Bool {
