@@ -170,7 +170,7 @@ struct PostRow: View {
                 .aspectRatio(photo.aspectRatio ?? 1.4, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
-                .cornerRadius(6)
+                .cornerRadius(OVK.Metrics.compactCornerRadius)
                 .allowsHitTesting(false)
                 .photoHeroSource(photos: photos, index: 0, post: post, coordinator: photoHero)
         } else if !photos.isEmpty {
@@ -188,7 +188,7 @@ struct PostRow: View {
                                 .allowsHitTesting(false)
                         )
                         .clipped()
-                        .cornerRadius(4)
+                        .cornerRadius(OVK.Metrics.compactCornerRadius)
                         .photoHeroSource(photos: photos, index: i, post: post, coordinator: photoHero)
                 }
             }
@@ -200,8 +200,8 @@ struct PostRow: View {
     private func repostBlock(_ repost: Post.Repost) -> some View {
         HStack(spacing: 0) {
             Rectangle()
-                .fill(OVK.Palette.separator)
-                .frame(width: 3)
+                .fill(OVK.Palette.primary)
+                .frame(width: 2)
             VStack(alignment: .leading, spacing: 6) {
                 Button { openAuthor(repost.fromID) } label: {
                     HStack(spacing: 8) {
@@ -210,7 +210,7 @@ struct PostRow: View {
                         }
                         .frame(width: 28, height: 28)
                         .clipped()
-                        .cornerRadius(3)
+                        .cornerRadius(OVK.Metrics.compactCornerRadius)
                         Text(authors[repost.fromID]?.name ?? "Запись")
                             .font(.caption).fontWeight(.semibold)
                             .foregroundColor(OVK.Palette.link)
@@ -245,8 +245,8 @@ struct PostRow: View {
             // удержание >0.4с — только long-press, тап при этом НЕ срабатывает).
             // Не Button + .simultaneousGesture (оба срабатывали разом: лайк И список)
             // и не LongPress.exclusively(before: Tap) (тап-лайк проглатывался).
-            Label("\(likes.count(post))", systemImage: likes.isLiked(post) ? "heart.fill" : "heart")
-                .foregroundColor(likes.isLiked(post) ? .red : OVK.Palette.textSecondary)
+            Label("\(likes.count(post))", systemImage: "heart")
+                .foregroundColor(likes.isLiked(post) ? OVK.Palette.primary : OVK.Palette.textSecondary)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     likes.toggle(post, settings: settings)
@@ -272,8 +272,9 @@ struct PostRow: View {
             .buttonStyle(.plain)
             Spacer()
         }
-        .font(.system(size: 15)) // как в PhotoHero (pointSize 16 иконка / 15pt текст)
-        .padding(.top, 2)
+        .font(.system(size: 15, weight: .regular))
+        .padding(.top, 8)
+        .overlay(OVKHairline(), alignment: .top)
     }
 
     private static let formatter: DateFormatter = {

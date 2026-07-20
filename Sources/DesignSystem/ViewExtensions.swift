@@ -34,6 +34,21 @@ struct OVKHairline: View {
     }
 }
 
+extension View {
+    /// Единая строка записи для ленты и стен: белая плоскость, тонкие границы и
+    /// узкий серый интервал. Контент PostRow остаётся одинаковым во всех местах.
+    func ovkPostListRow() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .background(OVK.Palette.card)
+            .overlay(OVKHairline(), alignment: .top)
+            .overlay(OVKHairline(), alignment: .bottom)
+            .padding(.bottom, OVK.Metrics.compactCornerRadius)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(OVK.Palette.background)
+    }
+}
+
 /// Компактный сегментированный переключатель эпохи iOS 7: тонкая синяя рамка,
 /// синий выбранный сегмент и неизменная геометрия на всех поддерживаемых iOS.
 struct OVKSegmentedControl<Selection: Hashable>: View {

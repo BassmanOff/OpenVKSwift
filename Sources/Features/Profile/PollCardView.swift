@@ -30,12 +30,12 @@ struct PollCardView: View {
                 }
                 Button { Task { await vote(Array(selected)) } } label: {
                     Text("Проголосовать")
-                        .font(.subheadline).fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
                         .background(OVK.Palette.primary)
                         .foregroundColor(.white)
-                        .cornerRadius(6)
+                        .cornerRadius(OVK.Metrics.compactCornerRadius)
                 }
                 .buttonStyle(.plain)
                 .disabled(selected.isEmpty || isVoting)
@@ -63,9 +63,7 @@ struct PollCardView: View {
             .font(.caption)
             .foregroundColor(OVK.Palette.textSecondary)
         }
-        .padding()
-        .background(OVK.Palette.background)
-        .cornerRadius(8)
+        .padding(.vertical, 4)
     }
 
     private func choiceRow(_ answer: Poll.Answer, checked: Bool) -> some View {

@@ -60,7 +60,7 @@ private struct MediaAttachmentsContent: View {
             .frame(maxWidth: .infinity)
             .frame(height: 180)
             .clipped()
-            .cornerRadius(6)
+            .cornerRadius(OVK.Metrics.compactCornerRadius)
 
             Image(systemName: "play.circle.fill")
                 .font(.system(size: 44))
@@ -78,7 +78,7 @@ private struct MediaAttachmentsContent: View {
                 .padding(6)
                 .background(Color.black.opacity(0.45))
             }
-            .cornerRadius(6)
+            .cornerRadius(OVK.Metrics.compactCornerRadius)
         }
     }
 
@@ -182,7 +182,10 @@ private struct RowScopedContextMenu: UIViewRepresentable {
             ) else { return nil }
             let parameters = UIPreviewParameters()
             parameters.backgroundColor = .clear
-            parameters.visiblePath = UIBezierPath(roundedRect: snapshot.bounds, cornerRadius: 8)
+            parameters.visiblePath = UIBezierPath(
+                roundedRect: snapshot.bounds,
+                cornerRadius: OVK.Metrics.compactCornerRadius
+            )
             let target = UIPreviewTarget(container: window,
                                          center: CGPoint(x: frame.midX, y: frame.midY))
             return UITargetedPreview(view: snapshot, parameters: parameters, target: target)

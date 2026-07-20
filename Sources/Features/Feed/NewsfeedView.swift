@@ -104,13 +104,12 @@ struct NewsfeedView: View {
     private var feedList: some View {
         List {
             ForEach(model.posts) { post in
-                card {
-                    PostRow(post: post, authors: model.authors, onDelete: { p in
-                        Task { await model.delete(p, settings: settings) }
-                    }, onEdited: { p in
-                        Task { await model.refreshPost(ownerID: p.ownerID, postID: p.postID, settings: settings) }
-                    })
-                }
+                PostRow(post: post, authors: model.authors, onDelete: { p in
+                    Task { await model.delete(p, settings: settings) }
+                }, onEdited: { p in
+                    Task { await model.refreshPost(ownerID: p.ownerID, postID: p.postID, settings: settings) }
+                })
+                .ovkPostListRow()
                 .onAppear {
                     if post.id == model.posts.last?.id {
                         print("[Feed] onAppear last item: \(post.id), loadingMore: \(model.isLoadingMore)")
@@ -131,13 +130,4 @@ struct NewsfeedView: View {
         .refreshable { await model.reload(settings: settings) }
     }
 
-    private func card<V: View>(@ViewBuilder _ content: () -> V) -> some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(OVK.Palette.card)
-            .padding(.bottom, 8)
-            .listRowInsets(EdgeInsets())
-            .listRowSeparator(.hidden)
-            .listRowBackground(OVK.Palette.background)
-    }
 }

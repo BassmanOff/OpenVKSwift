@@ -126,15 +126,15 @@ traits, and label fit on an iPhone SE-width screen.
 
 #### News
 
-- [ ] Keep posts full-width and opaque; do not introduce floating cards or per-post blur.
-- [ ] Use a lighter rhythm between posts: narrow gray separation plus crisp hairlines.
-- [ ] Add a subtle hairline above the action row.
-- [ ] Use regular-weight outline action icons and blue active states.
-- [ ] Standardize avatar, media, poll, and repost corner radii.
-- [ ] Flatten polls and replace oversized modern filled actions with compact blue or
+- [x] Keep posts full-width and opaque; do not introduce floating cards or per-post blur.
+- [x] Use a lighter rhythm between posts: narrow gray separation plus crisp hairlines.
+- [x] Add a subtle hairline above the action row.
+- [x] Use regular-weight outline action icons and blue active states.
+- [x] Standardize avatar, media, poll, and repost corner radii.
+- [x] Flatten polls and replace oversized modern filled actions with compact blue or
   hairline actions.
-- [ ] Use a thin VK-blue repost accent instead of a heavy gray stripe.
-- [ ] Preserve identical post metrics between News and the Profile wall.
+- [x] Use a thin VK-blue repost accent instead of a heavy gray stripe.
+- [x] Preserve identical post metrics between News and the Profile wall.
 
 #### Messages
 
