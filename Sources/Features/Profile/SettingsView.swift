@@ -222,6 +222,11 @@ struct SettingsView: View {
                     }
                     .disabled(isCheckingUpdate)
                 }
+                Section {
+                    Button("Выйти", role: .destructive) {
+                        settings.signOut()
+                    }
+                }
             }
             .navigationTitle("Настройки")
             .navigationBarTitleDisplayMode(.inline)

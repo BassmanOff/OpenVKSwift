@@ -59,20 +59,14 @@ struct ProfileView: View {
                         Button { showCompose = true } label: {
                             Image(systemName: "square.and.pencil")
                         }
+                        .accessibilityLabel("Новая запись")
                         if isOwn {
-                            Menu {
-                                Button { showEditProfile = true } label: {
-                                    Label("Редактировать профиль", systemImage: "pencil")
-                                }
-                                Button { showSettings = true } label: {
-                                    Label("Настройки", systemImage: "gearshape")
-                                }
-                                Button(role: .destructive) {
-                                    settings.signOut()
-                                } label: {
-                                    Label("Выйти", systemImage: "rectangle.portrait.and.arrow.right")
-                                }
-                            } label: {
+                            Button { showEditProfile = true } label: {
+                                Image(systemName: "pencil")
+                            }
+                            .accessibilityLabel("Редактировать профиль")
+
+                            Button { showSettings = true } label: {
                                 Image(systemName: "gearshape")
                                     .overlay(alignment: .topTrailing) {
                                         if updateAvailable {
@@ -83,6 +77,7 @@ struct ProfileView: View {
                                         }
                                     }
                             }
+                            .accessibilityLabel("Настройки")
                         }
                     }
                 }
@@ -139,9 +134,19 @@ struct ProfileView: View {
     var content: some View {
         if let user = model.user {
             List {
-                card { header(user) }
-                if let counters = user.counters { card { countersBar(counters) } }
-                if let info = infoCard(user) { card { info } }
+                card {
+                    VStack(spacing: 0) {
+                        header(user)
+                        if let counters = user.counters {
+                            OVKHairline()
+                            countersBar(counters)
+                        }
+                        if let info = infoCard(user) {
+                            OVKHairline()
+                            info
+                        }
+                    }
+                }
                 if !isOwn { card { actionRow(user) } }
 
                 if wall.posts.isEmpty && !wall.isLoading {
@@ -227,106 +232,134 @@ struct ProfileView: View {
     // MARK: - Шапка
 
     private func header(_ user: User) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            ZStack(alignment: .bottomTrailing) {
-                // Тот же UIKit-просмотрщик, что и у обычных фото (не AvatarViewer):
-                // «...» в нём даёт «Изменить фото профиля» только на своей странице (isOwn).
-                Group {
-                    if let url = user.fullAvatarURL ?? user.avatarURL {
-                        avatarImage(user)
-                            .photoHeroSource(
-                                photos: [.avatar(ownerID: user.id, url: url)],
-                                index: 0,
-                                post: nil,
-                                coordinator: photoHero,
-                                onChangeAvatar: isOwn ? { showAvatarSourceDialog = true } : nil
-                            )
-                    } else {
-                        avatarImage(user)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 14) {
+                ZStack(alignment: .bottomTrailing) {
+                    // Тот же UIKit-просмотрщик, что и у обычных фото (не AvatarViewer):
+                    // «...» в нём даёт «Изменить фото профиля» только на своей странице (isOwn).
+                    Group {
+                        if let url = user.fullAvatarURL ?? user.avatarURL {
+                            avatarImage(user)
+                                .photoHeroSource(
+                                    photos: [.avatar(ownerID: user.id, url: url)],
+                                    index: 0,
+                                    post: nil,
+                                    coordinator: photoHero,
+                                    onChangeAvatar: isOwn ? { showAvatarSourceDialog = true } : nil
+                                )
+                        } else {
+                            avatarImage(user)
+                        }
                     }
-                }
 
-                if user.online {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 14, height: 14)
-                        .overlay(Circle().stroke(OVK.Palette.card, lineWidth: 2))
-                        .offset(x: 3, y: 3)
-                }
-            }
-            .confirmationDialog("Изменить фото профиля", isPresented: $showAvatarSourceDialog, titleVisibility: .visible) {
-                if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    Button("Камера") { showCameraPicker = true }
-                }
-                Button("Медиатека") { showLibraryPicker = true }
-            }
-            .fullScreenCover(isPresented: $showCameraPicker) {
-                CameraPicker { uploadAvatar($0) }.ignoresSafeArea()
-            }
-            .sheet(isPresented: $showLibraryPicker) {
-                PhotoPicker { uploadAvatar($0) }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    Text(user.fullName)
-                        .font(.title3).fontWeight(.semibold)
-                        .foregroundColor(OVK.Palette.textPrimary)
-                    // Пасхалка: разработчик (id21510) — иконка-гаечный ключ вместо галочки;
-                    // остальные верифицированные на сервере — обычная галочка verified.
-                    if user.id == 21510 {
-                        Image(systemName: "wrench.and.screwdriver.fill")
-                            .font(.subheadline)
-                            .foregroundColor(OVK.Palette.primary)
-                    } else if user.verified {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.subheadline)
-                            .foregroundColor(OVK.Palette.primary)
-                    }
-                }
-                if user.id == 21510 {
-                    Text("OpenVK iOS Creator")
-                        .font(.caption)
-                        .foregroundColor(OVK.Palette.primary)
-                }
-                HStack(spacing: 4) {
                     if user.online {
-                        let platform: User.OnlinePlatform = isOwn ? .iphone : user.onlinePlatform
-                        if platform.hasIcon {
-                            OnlinePlatformIcon(platform: platform)
-                        }
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 14, height: 14)
+                            .overlay(Circle().stroke(OVK.Palette.card, lineWidth: 2))
+                            .offset(x: 3, y: 3)
                     }
-                    Text(user.online ? "онлайн" : "не в сети")
-                        .font(.caption)
-                        .foregroundColor(user.online ? OVK.Palette.primary : OVK.Palette.textSecondary)
                 }
-                if let status = user.status, !status.isEmpty {
-                    Text(linkifiedText(status))
-                        .font(.subheadline)
-                        .foregroundColor(OVK.Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 2)
-                }
-                if let track = currentTrack {
-                    Button { player.play(track, in: [track]) } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "music.note")
-                                .font(.caption)
-                                .foregroundColor(OVK.Palette.primary)
-                            Text("Слушает: \(track.artist) — \(track.title)")
-                                .font(.subheadline)
-                                .foregroundColor(OVK.Palette.textPrimary)
-                                .lineLimit(1)
-                        }
-                        .padding(.top, 2)
+                .confirmationDialog("Изменить фото профиля", isPresented: $showAvatarSourceDialog, titleVisibility: .visible) {
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button("Камера") { showCameraPicker = true }
                     }
-                    .buttonStyle(.plain)
+                    Button("Медиатека") { showLibraryPicker = true }
                 }
-            }
+                .fullScreenCover(isPresented: $showCameraPicker) {
+                    CameraPicker { uploadAvatar($0) }.ignoresSafeArea()
+                }
+                .sheet(isPresented: $showLibraryPicker) {
+                    PhotoPicker { uploadAvatar($0) }
+                }
 
-            Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Text(user.fullName)
+                            .font(.title3).fontWeight(.semibold)
+                            .foregroundColor(OVK.Palette.textPrimary)
+                            .lineLimit(2)
+                        // Пасхалка: разработчик (id21510) — иконка-гаечный ключ вместо галочки;
+                        // остальные верифицированные на сервере — обычная галочка verified.
+                        if user.id == 21510 {
+                            Image(systemName: "wrench.and.screwdriver.fill")
+                                .font(.subheadline)
+                                .foregroundColor(OVK.Palette.primary)
+                        } else if user.verified {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.subheadline)
+                                .foregroundColor(OVK.Palette.primary)
+                        }
+                    }
+                    if user.id == 21510 {
+                        Text("OpenVK iOS Creator")
+                            .font(.caption)
+                            .foregroundColor(OVK.Palette.primary)
+                    }
+                    HStack(spacing: 4) {
+                        if user.online {
+                            let platform: User.OnlinePlatform = isOwn ? .iphone : user.onlinePlatform
+                            if platform.hasIcon {
+                                OnlinePlatformIcon(platform: platform)
+                            }
+                        }
+                        Text(user.online ? "онлайн" : "не в сети")
+                            .font(.caption)
+                            .foregroundColor(user.online ? OVK.Palette.primary : OVK.Palette.textSecondary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding()
+
+            if hasProfileSummary(user) {
+                OVKHairline()
+                VStack(alignment: .leading, spacing: 10) {
+                    if let status = user.status, !status.isEmpty {
+                        Text(linkifiedText(status))
+                            .font(.subheadline)
+                            .foregroundColor(OVK.Palette.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let track = currentTrack {
+                        Text("Слушает")
+                            .font(.caption)
+                            .foregroundColor(OVK.Palette.textSecondary)
+                        Button { player.play(track, in: [track]) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "music.note")
+                                    .font(.subheadline)
+                                    .foregroundColor(OVK.Palette.primary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(track.title)
+                                        .font(.subheadline)
+                                        .foregroundColor(OVK.Palette.textPrimary)
+                                        .lineLimit(1)
+                                    Text(track.artist)
+                                        .font(.footnote)
+                                        .foregroundColor(OVK.Palette.link)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "play.circle")
+                                    .foregroundColor(OVK.Palette.primary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Слушает \(track.artist) — \(track.title)")
+                    }
+                }
+                .padding(.horizontal, OVK.Metrics.contentInset)
+                .padding(.vertical, 10)
+            }
         }
-        .padding()
+    }
+
+    private func hasProfileSummary(_ user: User) -> Bool {
+        if let status = user.status, !status.isEmpty { return true }
+        return currentTrack != nil
     }
 
     private func avatarImage(_ user: User) -> some View {
@@ -340,7 +373,7 @@ struct ProfileView: View {
         }
         .frame(width: 80, height: 80)
         .clipped()
-        .cornerRadius(4)
+        .cornerRadius(OVK.Metrics.compactCornerRadius)
     }
 
     /// Загружает выбранное/снятое фото как новый аватар и обновляет профиль с сервера.
@@ -374,7 +407,8 @@ struct ProfileView: View {
 
     private func counterButton(_ label: String, _ value: Int, _ dest: CounterRoute) -> some View {
         Button { route = dest } label: { counterItem(label, value) }
-            .buttonStyle(.plain)
+            .buttonStyle(ProfileCounterButtonStyle())
+            .accessibilityLabel("\(value) \(label)")
     }
 
     @ViewBuilder
@@ -393,52 +427,51 @@ struct ProfileView: View {
         VStack(spacing: 2) {
             Text("\(value)")
                 .font(.headline)
-                .foregroundColor(OVK.Palette.textPrimary)
+                .foregroundColor(OVK.Palette.link)
             Text(label)
                 .font(.caption2)
-                .foregroundColor(OVK.Palette.textSecondary)
+                .foregroundColor(OVK.Palette.link)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: OVK.Metrics.minimumTapSize)
     }
 
     // MARK: - Действия (дружба, сообщение, ещё)
 
     private func actionRow(_ user: User) -> some View {
-        HStack(spacing: 10) {
-            Button {
-                Task { await toggleFriend() }
-            } label: {
-                Text(friendButtonTitle)
-                    .font(.subheadline).fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(friendButtonBackground)
-                    .foregroundColor(friendButtonForeground)
-                    .cornerRadius(6)
+        HStack(spacing: 8) {
+            if friendshipIsPrimary {
+                friendshipButton(primary: true)
+                messageButton(user, primary: false)
+            } else {
+                messageButton(user, primary: true)
+                friendshipButton(primary: false)
             }
-            .buttonStyle(.plain)
-
-            Button { openChatPeerID = user.id } label: {
-                Image(systemName: "envelope")
-                    .font(.system(size: 15, weight: .medium))
-                    .frame(width: 36, height: 36)
-                    .background(OVK.Palette.background)
-                    .foregroundColor(OVK.Palette.textPrimary)
-                    .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-
-            Button { } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .medium))
-                    .frame(width: 36, height: 36)
-                    .background(OVK.Palette.background)
-                    .foregroundColor(OVK.Palette.textPrimary)
-                    .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
         }
         .padding()
+    }
+
+    private var friendshipIsPrimary: Bool {
+        model.friendStatus != 1 && model.friendStatus != 3
+    }
+
+    private func friendshipButton(primary: Bool) -> some View {
+        Button {
+            Task { await toggleFriend() }
+        } label: {
+            Text(friendButtonTitle)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .buttonStyle(ProfileActionButtonStyle(primary: primary))
+    }
+
+    private func messageButton(_ user: User, primary: Bool) -> some View {
+        Button { openChatPeerID = user.id } label: {
+            Text("Сообщение")
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .buttonStyle(ProfileActionButtonStyle(primary: primary))
     }
 
     var friendButtonTitle: String {
@@ -448,14 +481,6 @@ struct ProfileView: View {
         case 3:  return "В друзьях"
         default: return "Добавить в друзья"
         }
-    }
-
-    var friendButtonBackground: Color {
-        model.friendStatus == 3 ? OVK.Palette.background : OVK.Palette.primary
-    }
-
-    var friendButtonForeground: Color {
-        model.friendStatus == 3 ? OVK.Palette.textPrimary : .white
     }
 
     func toggleFriend() async {
@@ -512,14 +537,14 @@ struct ProfileView: View {
                     .padding(.vertical, 8)
 
                     if index < rows.count - 1 {
-                        Divider().padding(.leading)
+                        OVKHairline().padding(.leading, OVK.Metrics.contentInset)
                     }
                 }
 
                 // Доп. поля (музыка/фильмы/интересы/…) — отдельным листом, чтобы не раздувать
                 // карточку профиля тем, что заполняет меньшинство пользователей.
                 if !ProfileAllInfoView.rows(for: user).isEmpty {
-                    Divider().padding(.leading)
+                    OVKHairline().padding(.leading, OVK.Metrics.contentInset)
                     Button { showAllInfo = true } label: {
                         HStack {
                             Text("Все данные")
@@ -539,6 +564,33 @@ struct ProfileView: View {
         )
     }
 
+}
+
+private struct ProfileCounterButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.55 : 1)
+    }
+}
+
+private struct ProfileActionButtonStyle: ButtonStyle {
+    let primary: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundColor(primary ? .white : OVK.Palette.primary)
+            .frame(maxWidth: .infinity, minHeight: OVK.Metrics.minimumTapSize)
+            .background(primary ? OVK.Palette.primary : OVK.Palette.card)
+            .cornerRadius(OVK.Metrics.compactCornerRadius)
+            .overlay {
+                if !primary {
+                    RoundedRectangle(cornerRadius: OVK.Metrics.compactCornerRadius)
+                        .stroke(OVK.Palette.separator, lineWidth: 1 / UIScreen.main.scale)
+                }
+            }
+            .opacity(configuration.isPressed ? 0.65 : 1)
+    }
 }
 
 func card<V: View>(@ViewBuilder _ content: () -> V) -> some View {

@@ -170,16 +170,16 @@ traits, and label fit on an iPhone SE-width screen.
 
 #### Profile
 
-- [ ] Keep the existing 80 pt rounded-square profile avatar.
-- [ ] Make identity, counters, and basic information one calm white profile surface with
+- [x] Keep the existing 80 pt rounded-square profile avatar.
+- [x] Make identity, counters, and basic information one calm white profile surface with
   hairline divisions; reserve gray gutters for genuinely separate groups and posts.
-- [ ] Put long status/listening information on a full-width row beneath identity.
-- [ ] Match listening text to the player hierarchy and link colors.
-- [ ] Present counters as borderless blue navigation targets with clear pressed feedback.
-- [ ] Replace the rounded action-button cluster with one clear 44 pt primary action and
+- [x] Put long status/listening information on a full-width row beneath identity.
+- [x] Match listening text to the player hierarchy and link colors.
+- [x] Present counters as borderless blue navigation targets with clear pressed feedback.
+- [x] Replace the rounded action-button cluster with one clear 44 pt primary action and
   flat or hairline secondary actions.
-- [ ] Prefer direct, visible navigation to Settings over hiding it in a modern menu.
-- [ ] Keep Profile wall posts visually identical to News posts.
+- [x] Prefer direct, visible navigation to Settings over hiding it in a modern menu.
+- [x] Keep Profile wall posts visually identical to News posts.
 
 Acceptance criteria:
 
