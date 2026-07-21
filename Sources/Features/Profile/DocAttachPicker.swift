@@ -18,16 +18,19 @@ struct DocAttachPicker: View {
 
     var body: some View {
         NavigationView {
-            Group {
-                if showingSearch {
-                    list(searchResults, empty: "Ничего не найдено", loading: isSearching)
-                } else {
-                    list(ownDocs, empty: "Нет файлов", loading: isLoadingOwn)
+            VStack(spacing: 0) {
+                OVKSearchStrip(text: $searchText, prompt: "Поиск файлов")
+                Group {
+                    if showingSearch {
+                        list(searchResults, empty: "Ничего не найдено", loading: isSearching)
+                    } else {
+                        list(ownDocs, empty: "Нет файлов", loading: isLoadingOwn)
+                    }
                 }
             }
+            .background(OVK.Palette.background.ignoresSafeArea())
             .navigationTitle("Прикрепить файл")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Поиск файлов")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Отмена") { dismiss() }
@@ -57,6 +60,7 @@ struct DocAttachPicker: View {
             List(docs) { doc in
                 Button { onPick(doc); dismiss() } label: { row(doc) }
                     .buttonStyle(.plain)
+                    .ovkPlainListRow()
             }
             .listStyle(.plain)
         }

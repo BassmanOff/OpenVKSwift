@@ -193,7 +193,7 @@ Acceptance criteria:
   headers, hairlines, and flat blue actions.
 - [x] Replace modern inset-grouped Profile information and Settings forms with full-width
   rectangular white sections on gray.
-- [ ] Apply the same treatment to archived chats, album details, comments, groups,
+- [x] Apply the same treatment to archived chats, album details, comments, groups,
   attachments, and other pushed screens as they are encountered.
 - [ ] Use the shared empty/loading/error states throughout secondary lists.
 - [ ] Keep native alerts and action sheets where they already fit the interaction.

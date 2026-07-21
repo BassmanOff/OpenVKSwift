@@ -16,16 +16,19 @@ struct AudioAttachPicker: View {
 
     var body: some View {
         NavigationView {
-            Group {
-                if isSearching {
-                    searchList
-                } else {
-                    libraryList
+            VStack(spacing: 0) {
+                OVKSearchStrip(text: $searchText, prompt: "Поиск треков")
+                Group {
+                    if isSearching {
+                        searchList
+                    } else {
+                        libraryList
+                    }
                 }
             }
+            .background(OVK.Palette.background.ignoresSafeArea())
             .navigationTitle("Прикрепить трек")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Поиск треков")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Отмена") { dismiss() }
@@ -55,6 +58,7 @@ struct AudioAttachPicker: View {
             List(library.tracks) { track in
                 Button { pick(track) } label: { AudioRow(track: track, showAddToLibrary: false) }
                     .buttonStyle(.plain)
+                    .ovkPlainListRow()
             }
             .listStyle(.plain)
         }
@@ -76,6 +80,7 @@ struct AudioAttachPicker: View {
             List(search.tracks) { track in
                 Button { pick(track) } label: { AudioRow(track: track, showAddToLibrary: false, showAddedBadge: true) }
                     .buttonStyle(.plain)
+                    .ovkPlainListRow()
             }
             .listStyle(.plain)
         }

@@ -35,6 +35,14 @@ struct OVKHairline: View {
 }
 
 extension View {
+    /// Плоская строка вторичного списка: системные отступы остаются нативными,
+    /// а разделитель всегда занимает один физический пиксель.
+    func ovkPlainListRow() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .listRowSeparator(.hidden)
+            .listRowBackground(OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom))
+    }
+
     /// Единая строка записи для ленты и стен: белая плоскость, тонкие границы и
     /// узкий серый интервал. Контент PostRow остаётся одинаковым во всех местах.
     func ovkPostListRow() -> some View {

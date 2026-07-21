@@ -85,6 +85,7 @@ struct AlbumDetailView: View {
             } else {
                 ForEach(model.tracks) { track in
                     AudioRow(track: track)
+                        .ovkPlainListRow()
                         .contentShape(Rectangle())
                         .onTapGesture {
                             guard track.isPlayable else { return }
@@ -138,6 +139,7 @@ struct AlbumDetailView: View {
         }
         .padding(OVK.Metrics.contentInset)
         .listRowInsets(EdgeInsets())
-        .listRowBackground(OVK.Palette.card)
+        .listRowSeparator(.hidden)
+        .listRowBackground(OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom))
     }
 }

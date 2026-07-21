@@ -11,15 +11,19 @@ struct GroupsView: View {
     @State private var query = ""
 
     var body: some View {
-        List {
-            if query.isEmpty {
-                tabContent
-            } else {
-                searchContent
+        VStack(spacing: 0) {
+            OVKSearchStrip(text: $query, prompt: "Поиск сообществ")
+
+            List {
+                if query.isEmpty {
+                    tabContent
+                } else {
+                    searchContent
+                }
             }
+            .listStyle(.plain)
         }
-        .listStyle(.plain)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск")
+        .background(OVK.Palette.background.ignoresSafeArea())
         .navigationTitle("Сообщества")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { bottomBar }
@@ -50,11 +54,13 @@ struct GroupsView: View {
     private var searchContent: some View {
         let local = model.localMatches(query)
         if !local.isEmpty {
-            Section("Мои сообщества") {
+            Section {
                 ForEach(local) { groupRow($0) }
+            } header: {
+                sectionHeader("Мои сообщества")
             }
         }
-        Section("Глобальный поиск") {
+        Section {
             if model.isSearching {
                 HStack { Spacer(); ProgressView(); Spacer() }.listRowSeparator(.hidden)
             } else if model.searchResults.isEmpty && local.isEmpty {
@@ -62,7 +68,16 @@ struct GroupsView: View {
             } else {
                 ForEach(model.searchResults) { groupRow($0) }
             }
+        } header: {
+            sectionHeader("Глобальный поиск")
         }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.footnote)
+            .foregroundColor(OVK.Palette.textSecondary)
+            .textCase(nil)
     }
 
     private func groupRow(_ group: Community) -> some View {
@@ -91,6 +106,7 @@ struct GroupsView: View {
             }
             .padding(.vertical, 2)
         }
+        .ovkPlainListRow()
     }
 
     // MARK: - Нижние вкладки (как в старом VK)
@@ -100,8 +116,7 @@ struct GroupsView: View {
             tabButton("Сообщества", .all, count: model.allGroups.count)
             tabButton("Управление", .admin, count: model.adminGroups.count)
         }
-        .background(OVK.Palette.card)
-        .overlay(Divider(), alignment: .top)
+        .background(OVK.Palette.card.overlay(OVKHairline(), alignment: .top))
     }
 
     private func tabButton(_ title: String, _ value: Tab, count: Int) -> some View {
@@ -112,7 +127,7 @@ struct GroupsView: View {
             }
             .foregroundColor(tab == value ? OVK.Palette.primary : OVK.Palette.textSecondary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+            .frame(minHeight: OVK.Metrics.minimumTapSize)
         }
     }
 }

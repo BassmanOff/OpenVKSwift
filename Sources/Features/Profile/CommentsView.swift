@@ -91,7 +91,7 @@ struct CommentsView: View {
                     if let displayPost = displayPost {
                         PostRow(post: displayPost, authors: model.authors, commentTapEnabled: false)
                             .background(OVK.Palette.card)
-                        Divider()
+                        OVKHairline()
                     }
                     ForEach(model.comments) { comment in
                         // Скорректированный id автора (отрицательный для групп-авторов,
@@ -112,7 +112,7 @@ struct CommentsView: View {
                             onDelete: { Task { await model.delete(comment, settings: settings) } }
                         )
                             .background(OVK.Palette.card)
-                        Divider().padding(.leading, 58)
+                        OVKHairline().padding(.leading, 58)
                     }
                 }
             }
@@ -258,4 +258,3 @@ struct CommentsView: View {
         .background(OVK.Palette.card)
     }
 }
-

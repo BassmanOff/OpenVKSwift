@@ -31,6 +31,7 @@ struct ArchivedConversationsView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .ovkPlainListRow()
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button {
                                 model.toggleArchive(convo.peerID)
