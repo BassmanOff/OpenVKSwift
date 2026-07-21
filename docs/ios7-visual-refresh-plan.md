@@ -195,8 +195,8 @@ Acceptance criteria:
   rectangular white sections on gray.
 - [x] Apply the same treatment to archived chats, album details, comments, groups,
   attachments, and other pushed screens as they are encountered.
-- [ ] Use the shared empty/loading/error states throughout secondary lists.
-- [ ] Keep native alerts and action sheets where they already fit the interaction.
+- [x] Use the shared empty/loading/error states throughout secondary lists.
+- [x] Keep native alerts and action sheets where they already fit the interaction.
 
 Acceptance criteria:
 

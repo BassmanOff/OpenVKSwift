@@ -40,11 +40,9 @@ struct GroupsView: View {
     private var tabContent: some View {
         let groups = tab == .all ? model.allGroups : model.adminGroups
         if model.isLoading && groups.isEmpty {
-            HStack { Spacer(); ProgressView(); Spacer() }.listRowSeparator(.hidden)
+            OVKListStateView(message: "Загрузка сообществ…", isLoading: true)
         } else if groups.isEmpty {
-            Text(tab == .all ? "Нет сообществ" : "Нет управляемых сообществ")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .listRowSeparator(.hidden)
+            OVKListStateView(message: tab == .all ? "Нет сообществ" : "Нет управляемых сообществ")
         } else {
             ForEach(groups) { groupRow($0) }
         }
@@ -62,9 +60,9 @@ struct GroupsView: View {
         }
         Section {
             if model.isSearching {
-                HStack { Spacer(); ProgressView(); Spacer() }.listRowSeparator(.hidden)
+                OVKListStateView(message: "Поиск сообществ…", isLoading: true)
             } else if model.searchResults.isEmpty && local.isEmpty {
-                Text("Ничего не найдено").foregroundColor(OVK.Palette.textSecondary)
+                OVKListStateView(message: "Ничего не найдено")
             } else {
                 ForEach(model.searchResults) { groupRow($0) }
             }

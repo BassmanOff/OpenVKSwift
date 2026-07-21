@@ -26,6 +26,7 @@ struct FriendsView: View {
                     } label: {
                         FriendRow(user: friend)
                     }
+                    .ovkPlainListRow()
                 }
                 .listStyle(.plain)
                 .refreshable { await model.load(userID: userID, settings: settings) }
@@ -45,24 +46,7 @@ struct FriendsStateView: View {
     var retry: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: 10) {
-            if isLoading {
-                ProgressView()
-            }
-            Text(message)
-                .font(.subheadline)
-                .foregroundColor(OVK.Palette.textSecondary)
-                .multilineTextAlignment(.center)
-            if let retry {
-                Button("Повторить", action: retry)
-                    .font(.subheadline)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 96)
-        .padding(.horizontal, OVK.Metrics.contentInset)
-        .listRowInsets(EdgeInsets())
-        .listRowSeparator(.hidden)
-        .listRowBackground(OVK.Palette.card)
+        OVKListStateView(message: message, isLoading: isLoading, retry: retry)
     }
 }
 

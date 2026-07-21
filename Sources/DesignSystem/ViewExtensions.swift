@@ -166,18 +166,47 @@ struct OVKSearchStrip: View {
     }
 }
 
-/// Небольшая вьюха «ошибка + повторить» (переиспользуется в списках).
+/// Единое спокойное состояние вторичного списка: загрузка, пустой результат или ошибка.
+struct OVKListStateView: View {
+    let message: String
+    var systemImage: String? = nil
+    var isLoading = false
+    var retry: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if isLoading {
+                ProgressView()
+            } else if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundColor(OVK.Palette.textSecondary)
+                    .accessibilityHidden(true)
+            }
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(OVK.Palette.textSecondary)
+                .multilineTextAlignment(.center)
+
+            if let retry {
+                Button("Повторить", action: retry)
+                    .font(.subheadline)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 96, maxHeight: .infinity)
+        .padding(.horizontal, OVK.Metrics.contentInset)
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(OVK.Palette.background)
+    }
+}
+
+/// Совместимое имя для существующих экранов с ошибкой и повтором.
 struct ErrorRetry: View {
     let message: String
     let retry: () -> Void
     var body: some View {
-        VStack(spacing: 12) {
-            Text(message)
-                .foregroundColor(OVK.Palette.textSecondary)
-                .multilineTextAlignment(.center)
-            Button("Повторить", action: retry)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        OVKListStateView(message: message, retry: retry)
     }
 }

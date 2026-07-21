@@ -51,11 +51,9 @@ struct DocAttachPicker: View {
     @ViewBuilder
     private func list(_ docs: [Document], empty: String, loading: Bool) -> some View {
         if loading && docs.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка файлов…", isLoading: true)
         } else if docs.isEmpty {
-            Text(empty)
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: empty)
         } else {
             List(docs) { doc in
                 Button { onPick(doc); dismiss() } label: { row(doc) }

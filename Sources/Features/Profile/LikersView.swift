@@ -34,11 +34,9 @@ struct LikersView: View {
         NavigationView {
             Group {
                 if vm.isLoading && vm.users.isEmpty {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    OVKListStateView(message: "Загрузка оценок…", isLoading: true)
                 } else if vm.users.isEmpty {
-                    Text(vm.errorMessage ?? "Пока никто не оценил")
-                        .foregroundColor(OVK.Palette.textSecondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    OVKListStateView(message: vm.errorMessage ?? "Пока никто не оценил")
                 } else {
                     // ScrollView, не List: List (UITableView) конфликтует со свайпом-закрытием
                     // sheet'а на iOS 15 — так же, как сделано в CommentsView.
@@ -47,7 +45,7 @@ struct LikersView: View {
                             ForEach(vm.users) { user in
                                 Button { open(user) } label: { row(user) }
                                     .buttonStyle(.plain)
-                                Divider().padding(.leading, 64)
+                                OVKHairline().padding(.leading, 64)
                             }
                         }
                     }

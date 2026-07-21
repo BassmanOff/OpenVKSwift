@@ -47,13 +47,11 @@ struct PhotosView: View {
     var body: some View {
         Group {
             if model.isLoading && model.photos.isEmpty {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                OVKListStateView(message: "Загрузка фотографий…", isLoading: true)
             } else if let error = model.errorMessage, model.photos.isEmpty {
                 ErrorRetry(message: error) { Task { await model.load(ownerID: ownerID, settings: settings) } }
             } else if model.photos.isEmpty {
-                Text("Нет фотографий")
-                    .foregroundColor(OVK.Palette.textSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                OVKListStateView(message: "Нет фотографий")
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 2) {

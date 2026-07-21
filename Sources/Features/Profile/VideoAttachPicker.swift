@@ -51,11 +51,9 @@ struct VideoAttachPicker: View {
     @ViewBuilder
     private func list(_ videos: [Video], empty: String, loading: Bool) -> some View {
         if loading && videos.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка видео…", isLoading: true)
         } else if videos.isEmpty {
-            Text(empty)
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: empty)
         } else {
             List(videos) { video in
                 Button { onPick(video); dismiss() } label: { row(video) }

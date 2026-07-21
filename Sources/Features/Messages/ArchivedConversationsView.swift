@@ -9,14 +9,7 @@ struct ArchivedConversationsView: View {
     var body: some View {
         Group {
             if model.archivedConversations.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "archivebox")
-                        .font(.system(size: 40))
-                        .foregroundColor(OVK.Palette.textSecondary)
-                    Text("Архив пуст")
-                        .foregroundColor(OVK.Palette.textSecondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                OVKListStateView(message: "Архив пуст", systemImage: "archivebox")
             } else {
                 List {
                     ForEach(model.archivedConversations) { convo in

@@ -78,10 +78,9 @@ struct AlbumDetailView: View {
             albumHeader
 
             if model.isLoading && model.tracks.isEmpty {
-                ProgressView().frame(maxWidth: .infinity)
+                OVKListStateView(message: "Загрузка треков…", isLoading: true)
             } else if model.tracks.isEmpty {
-                Text("Нет треков")
-                    .foregroundColor(OVK.Palette.textSecondary)
+                OVKListStateView(message: "Нет треков")
             } else {
                 ForEach(model.tracks) { track in
                     AudioRow(track: track)

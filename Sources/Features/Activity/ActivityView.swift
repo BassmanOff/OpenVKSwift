@@ -44,13 +44,12 @@ struct ActivityView: View {
     @ViewBuilder
     private var content: some View {
         if model.isLoading && model.notifications.isEmpty && model.friendRequests.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка уведомлений…", isLoading: true)
         } else if model.notifications.isEmpty && model.friendRequests.isEmpty {
-            VStack(spacing: 8) {
-                Image(systemName: "bell.slash").font(.system(size: 40)).foregroundColor(OVK.Palette.textSecondary)
-                Text(model.errorMessage ?? "Пока нет уведомлений").foregroundColor(OVK.Palette.textSecondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(
+                message: model.errorMessage ?? "Пока нет уведомлений",
+                systemImage: "bell.slash"
+            )
         } else {
             List {
                 if !model.friendRequests.isEmpty {

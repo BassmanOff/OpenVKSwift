@@ -80,11 +80,9 @@ struct CommentsView: View {
     @ViewBuilder
     private var list: some View {
         if model.isLoading && model.comments.isEmpty && displayPost == nil {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка комментариев…", isLoading: true)
         } else if model.comments.isEmpty && displayPost == nil {
-            Text("Пока нет комментариев")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Пока нет комментариев")
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
