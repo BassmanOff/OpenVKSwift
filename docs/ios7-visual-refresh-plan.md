@@ -138,15 +138,15 @@ traits, and label fit on an iPhone SE-width screen.
 
 #### Messages
 
-- [ ] Use stronger name/preview weight only for unread conversations.
-- [ ] Add a quiet pinned-conversations label or divider.
-- [ ] Use rounded-square avatars in the chat header as well as the conversation list.
-- [ ] Keep incoming and outgoing bubbles opaque with moderate regular corners.
-- [ ] Make the chat composer a fixed glass surface with a top hairline.
-- [ ] Use a simple bordered or clear input field rather than a heavy modern pill.
-- [ ] Flatten the scroll-to-bottom button and remove its heavy shadow.
-- [ ] Keep reactions and post previews compact, opaque, and shadow-free.
-- [ ] Preserve swipe gestures as the discoverable archive/pin path.
+- [x] Use stronger name/preview weight only for unread conversations.
+- [x] Add a quiet pinned-conversations label or divider.
+- [x] Use rounded-square avatars in the chat header as well as the conversation list.
+- [x] Keep incoming and outgoing bubbles opaque with moderate regular corners.
+- [x] Make the chat composer a fixed glass surface with a top hairline.
+- [x] Use a simple bordered or clear input field rather than a heavy modern pill.
+- [x] Flatten the scroll-to-bottom button and remove its heavy shadow.
+- [x] Keep reactions and post previews compact, opaque, and shadow-free.
+- [x] Preserve swipe gestures as the discoverable archive/pin path.
 
 #### Friends
 

@@ -10,8 +10,10 @@ enum MessageDelivery {
 /// Палитра для UIKit-слоя (те же значения, что OVK.Palette).
 enum OVKUI {
     static let primary       = UIColor(OVK.Palette.primary)
+    static let primaryDark   = UIColor(OVK.Palette.primaryDark)
     static let background    = UIColor(OVK.Palette.background)
     static let card          = UIColor(OVK.Palette.card)
+    static let separator     = UIColor(OVK.Palette.separator)
     static let textPrimary   = UIColor(OVK.Palette.textPrimary)
     static let textSecondary = UIColor(OVK.Palette.textSecondary)
     static let link          = UIColor(OVK.Palette.link)
@@ -387,8 +389,8 @@ final class MessageCell: UICollectionViewCell {
         column.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(column)
 
-        bubble.layer.cornerRadius = 12
-        bubble.layer.cornerCurve = .continuous
+        bubble.layer.cornerRadius = 8
+        bubble.layer.cornerCurve = .circular
 
         textView.isEditable = false
         textView.isScrollEnabled = false
@@ -402,7 +404,7 @@ final class MessageCell: UICollectionViewCell {
 
         photoImageView.contentMode = .scaleAspectFill
         photoImageView.clipsToBounds = true
-        photoImageView.layer.cornerRadius = 8
+        photoImageView.layer.cornerRadius = 4
         photoImageView.backgroundColor = OVKUI.background
         photoImageView.isHidden = true
         photoImageView.isUserInteractionEnabled = true
@@ -410,7 +412,7 @@ final class MessageCell: UICollectionViewCell {
         photoImageView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(photoTapped)))
         bubble.addSubview(photoImageView)
 
-        postCard.layer.cornerRadius = 8
+        postCard.layer.cornerRadius = 4
         postCard.clipsToBounds = true
         postCard.isHidden = true
         postCard.isUserInteractionEnabled = true
@@ -425,7 +427,7 @@ final class MessageCell: UICollectionViewCell {
 
         postThumbView.contentMode = .scaleAspectFill
         postThumbView.clipsToBounds = true
-        postThumbView.layer.cornerRadius = 8 // как у photoImageView — реальное фото поста должно выглядеть так же
+        postThumbView.layer.cornerRadius = 4 // как у photoImageView — реальное фото поста должно выглядеть так же
         postThumbView.backgroundColor = OVKUI.background
         postThumbView.translatesAutoresizingMaskIntoConstraints = false
         postCard.addSubview(postThumbView)
@@ -530,7 +532,7 @@ final class MessageCell: UICollectionViewCell {
             textView.isHidden = true
             cancelPhotoLoad()
 
-            postCard.backgroundColor = isOut ? UIColor.white.withAlphaComponent(0.14) : UIColor.black.withAlphaComponent(0.05)
+            postCard.backgroundColor = isOut ? OVKUI.primaryDark : OVKUI.background
             postAccentBar.isHidden = !(hasRealPhoto || useFullPostCard)
             postAccentBar.backgroundColor = isOut ? UIColor.white.withAlphaComponent(0.6) : OVKUI.link
             postAuthorLabel.textColor = isOut ? .white : OVKUI.textPrimary
@@ -713,10 +715,10 @@ final class MessageCell: UICollectionViewCell {
 
     private func makeChip(_ group: (emoji: String, count: Int, mine: Bool)) -> UIButton {
         var cfg = UIButton.Configuration.filled()
-        cfg.baseBackgroundColor = group.mine ? OVKUI.primary.withAlphaComponent(0.18) : OVKUI.card
-        cfg.background.cornerRadius = 11
-        cfg.background.strokeColor = group.mine ? OVKUI.primary.withAlphaComponent(0.5) : .clear
-        cfg.background.strokeWidth = group.mine ? 1 : 0
+        cfg.baseBackgroundColor = OVKUI.card
+        cfg.background.cornerRadius = 4
+        cfg.background.strokeColor = group.mine ? OVKUI.primary : OVKUI.separator
+        cfg.background.strokeWidth = 1 / UIScreen.main.scale
         cfg.contentInsets = NSDirectionalEdgeInsets(top: 3, leading: 7, bottom: 3, trailing: 7)
 
         var title = AttributedString(group.emoji)

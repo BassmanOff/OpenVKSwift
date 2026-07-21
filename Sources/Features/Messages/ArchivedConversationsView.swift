@@ -31,6 +31,14 @@ struct ArchivedConversationsView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button {
+                                model.toggleArchive(convo.peerID)
+                            } label: {
+                                Label("Из архива", systemImage: "tray.and.arrow.up")
+                            }
+                            .tint(OVK.Palette.primary)
+                        }
                         .contextMenu {
                             Button {
                                 model.toggleArchive(convo.peerID)

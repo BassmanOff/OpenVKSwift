@@ -622,7 +622,7 @@ struct ChatView: View {
                             }
                         }
                         .frame(width: 30, height: 30)
-                        .clipShape(Circle())
+                        .cornerRadius(OVK.Metrics.compactCornerRadius)
                         // Фиксированный размер шрифта: иначе после анимации перехода имя
                         // «подрастало» и обрезалось. Длинное имя мягко ужимается.
                         Text(title)

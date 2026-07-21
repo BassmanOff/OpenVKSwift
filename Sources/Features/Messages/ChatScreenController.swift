@@ -76,6 +76,8 @@ final class ChatScreenController: UIViewController {
 
     // Панель ввода
     private let inputBar = UIView()
+    private let inputBlur = UIVisualEffectView(effect: UIBlurEffect(style: .extraLight))
+    private let inputHairline = UIView()
     private let editBanner = UIStackView()
     private let textBackground = UIView()
     private let textView = SelfSizingTextView()
@@ -125,6 +127,10 @@ final class ChatScreenController: UIViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(keyboardChanged(_:)),
             name: UIResponder.keyboardWillChangeFrameNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(reduceTransparencyChanged(_:)),
+            name: UIAccessibility.reduceTransparencyStatusDidChangeNotification, object: nil
         )
 
         // Модель — источник истины. objectWillChange стреляет ДО мутации, поэтому
@@ -194,9 +200,16 @@ final class ChatScreenController: UIViewController {
     }
 
     private func buildInputBar() {
-        inputBar.backgroundColor = OVKUI.card
+        inputBar.backgroundColor = .clear
         inputBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(inputBar)
+
+        inputBlur.translatesAutoresizingMaskIntoConstraints = false
+        inputBar.addSubview(inputBlur)
+        inputHairline.backgroundColor = OVKUI.separator
+        inputHairline.translatesAutoresizingMaskIntoConstraints = false
+        inputBar.addSubview(inputHairline)
+        updateInputBarAppearance()
 
         // Баннер режима правки.
         let pencil = UIImageView(image: UIImage(systemName: "pencil"))
@@ -218,8 +231,10 @@ final class ChatScreenController: UIViewController {
         editBanner.isHidden = true
 
         // Поле ввода.
-        textBackground.backgroundColor = OVKUI.background
-        textBackground.layer.cornerRadius = 18
+        textBackground.backgroundColor = OVKUI.card
+        textBackground.layer.cornerRadius = 6
+        textBackground.layer.borderColor = OVKUI.separator.cgColor
+        textBackground.layer.borderWidth = 1 / UIScreen.main.scale
         textView.maxHeight = 120
         textView.font = .preferredFont(forTextStyle: .body)
         textView.backgroundColor = .clear
@@ -255,6 +270,15 @@ final class ChatScreenController: UIViewController {
         inputBar.addSubview(barStack)
 
         NSLayoutConstraint.activate([
+            inputBlur.topAnchor.constraint(equalTo: inputBar.topAnchor),
+            inputBlur.bottomAnchor.constraint(equalTo: inputBar.bottomAnchor),
+            inputBlur.leadingAnchor.constraint(equalTo: inputBar.leadingAnchor),
+            inputBlur.trailingAnchor.constraint(equalTo: inputBar.trailingAnchor),
+            inputHairline.topAnchor.constraint(equalTo: inputBar.topAnchor),
+            inputHairline.leadingAnchor.constraint(equalTo: inputBar.leadingAnchor),
+            inputHairline.trailingAnchor.constraint(equalTo: inputBar.trailingAnchor),
+            inputHairline.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale),
+
             barStack.topAnchor.constraint(equalTo: inputBar.topAnchor, constant: 5),
             barStack.bottomAnchor.constraint(equalTo: inputBar.bottomAnchor, constant: -5),
             barStack.leadingAnchor.constraint(equalTo: inputBar.leadingAnchor, constant: 6),
@@ -277,6 +301,23 @@ final class ChatScreenController: UIViewController {
         updateSendButton()
     }
 
+    @objc private func reduceTransparencyChanged(_ notification: Notification) {
+        updateInputBarAppearance()
+    }
+
+    private func updateInputBarAppearance() {
+        let usesOpaqueBackground = UIAccessibility.isReduceTransparencyEnabled
+            || traitCollection.accessibilityContrast == .high
+        inputBlur.effect = usesOpaqueBackground ? nil : UIBlurEffect(style: .extraLight)
+        inputBlur.backgroundColor = usesOpaqueBackground ? OVKUI.card : .clear
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.accessibilityContrast != traitCollection.accessibilityContrast else { return }
+        updateInputBarAppearance()
+    }
+
     private func buildStateViews() {
         emptyLabel.text = "Напишите первое сообщение"
         emptyLabel.textColor = OVKUI.textSecondary
@@ -295,11 +336,9 @@ final class ChatScreenController: UIViewController {
             UIImage(systemName: "chevron.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)),
             for: .normal
         )
-        scrollToBottomButton.layer.cornerRadius = 20
-        scrollToBottomButton.layer.shadowColor = UIColor.black.cgColor
-        scrollToBottomButton.layer.shadowOpacity = 0.15
-        scrollToBottomButton.layer.shadowRadius = 4
-        scrollToBottomButton.layer.shadowOffset = CGSize(width: 0, height: 2)
+        scrollToBottomButton.layer.cornerRadius = 6
+        scrollToBottomButton.layer.borderColor = OVKUI.separator.cgColor
+        scrollToBottomButton.layer.borderWidth = 1 / UIScreen.main.scale
         scrollToBottomButton.addAction(UIAction { [weak self] _ in self?.scrollToBottomTapped() }, for: .touchUpInside)
         scrollToBottomButton.alpha = 0
         scrollToBottomButton.translatesAutoresizingMaskIntoConstraints = false

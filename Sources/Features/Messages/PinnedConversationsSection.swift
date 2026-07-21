@@ -30,6 +30,22 @@ struct PinnedConversationsSection: View {
                 )
             }
             .buttonStyle(.plain)
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                Button {
+                    model.togglePin(convo.peerID)
+                } label: {
+                    Label("Открепить", systemImage: "pin.slash")
+                }
+                .tint(OVK.Palette.primary)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button {
+                    model.toggleArchive(convo.peerID)
+                } label: {
+                    Label("В архив", systemImage: "archivebox")
+                }
+                .tint(OVK.Palette.textSecondary)
+            }
             .contextMenu {
                 Button {
                     model.togglePin(convo.peerID)

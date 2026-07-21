@@ -436,6 +436,7 @@ struct ConversationsView: View {
                 // Закреплённые — обычные строки этого же списка (просто первые),
                 // скроллятся вместе со всем остальным.
                 if !model.pinnedConversations.isEmpty {
+                    pinnedLabel
                     PinnedConversationsSection(model: model, onOpen: openChat) {
                         withAnimation { editMode = .active }
                     }
@@ -447,6 +448,22 @@ struct ConversationsView: View {
                         row(convo)
                     }
                     .buttonStyle(.plain)
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        Button {
+                            model.togglePin(convo.peerID)
+                        } label: {
+                            Label("Закрепить", systemImage: "pin")
+                        }
+                        .tint(OVK.Palette.primary)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button {
+                            model.toggleArchive(convo.peerID)
+                        } label: {
+                            Label("В архив", systemImage: "archivebox")
+                        }
+                        .tint(OVK.Palette.textSecondary)
+                    }
                     .contextMenu { contextMenuItems(for: convo) }
                     .onAppear {
                         // Показалась последняя строка — догружаем следующую страницу.
@@ -466,6 +483,17 @@ struct ConversationsView: View {
             .refreshable { await model.load(settings: settings) }
             .environment(\.editMode, $editMode)
         }
+    }
+
+    private var pinnedLabel: some View {
+        Text("Закреплённые")
+            .font(.caption)
+            .foregroundColor(OVK.Palette.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, OVK.Metrics.contentInset)
+            .frame(height: 28)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(OVK.Palette.card)
     }
 
     /// Общее меню долгого нажатия — закрепить/открепить, в архив/из архива.
