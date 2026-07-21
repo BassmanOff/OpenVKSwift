@@ -157,16 +157,16 @@ traits, and label fit on an iPhone SE-width screen.
 
 #### Music
 
-- [ ] Rename `Online` to a clearer library label such as `My Music`.
-- [ ] Give every track row the same 44 pt artwork tile, including fallback artwork.
-- [ ] Use a black title and blue artist consistently with the player.
-- [ ] Limit the trailing area to duration plus one accessory at most.
-- [ ] Remove competing play, download, added, and status controls from the same row edge.
-- [ ] Use blue or muted gray for downloaded/added state instead of green.
-- [ ] Use filled symbols only for the playing or selected state.
-- [ ] Ensure album rows show only one disclosure indicator.
-- [ ] Give search failures an explicit retry state distinct from no results.
-- [ ] Keep album headers flat, white, editorial, and shadow-free.
+- [x] Rename `Online` to a clearer library label such as `My Music`.
+- [x] Give every track row the same 44 pt artwork tile, including fallback artwork.
+- [x] Use a black title and blue artist consistently with the player.
+- [x] Limit the trailing area to duration plus one accessory at most.
+- [x] Remove competing play, download, added, and status controls from the same row edge.
+- [x] Use blue or muted gray for downloaded/added state instead of green.
+- [x] Use filled symbols only for the playing or selected state.
+- [x] Ensure album rows show only one disclosure indicator.
+- [x] Give search failures an explicit retry state distinct from no results.
+- [x] Keep album headers flat, white, editorial, and shadow-free.
 
 #### Profile
 

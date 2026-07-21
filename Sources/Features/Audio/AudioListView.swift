@@ -29,7 +29,7 @@ struct AudioListView: View {
 
                 OVKSegmentedControl(
                     options: [
-                        (.online, "Онлайн"),
+                        (.online, "Моя музыка"),
                         (.downloads, "Загрузки"),
                         (.playlists, "Плейлисты")
                     ],
@@ -101,7 +101,7 @@ struct AudioListView: View {
         .toast($library.toast)
     }
 
-    // MARK: - Библиотека (Онлайн / Загрузки)
+    // MARK: - Библиотека (Моя музыка / Загрузки)
 
     @ViewBuilder
     private var libraryContent: some View {
@@ -149,7 +149,7 @@ struct AudioListView: View {
                     .foregroundColor(OVK.Palette.textSecondary)
                 Text("Нет скачанных треков")
                     .foregroundColor(OVK.Palette.textSecondary)
-                Text("Нажмите ↓ у трека во вкладке «Онлайн», чтобы слушать офлайн")
+                Text("Нажмите ↓ у трека во вкладке «Моя музыка», чтобы слушать офлайн")
                     .font(.footnote)
                     .foregroundColor(OVK.Palette.textSecondary)
                     .multilineTextAlignment(.center)
@@ -220,6 +220,8 @@ struct AudioListView: View {
     private var searchTracks: some View {
         if search.isLoading && search.tracks.isEmpty {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = search.trackErrorMessage, search.tracks.isEmpty {
+            searchFailure(error)
         } else if search.tracks.isEmpty {
             emptySearch
         } else {
@@ -236,6 +238,8 @@ struct AudioListView: View {
     private var searchAlbums: some View {
         if search.isLoading && search.albums.isEmpty {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = search.albumErrorMessage, search.albums.isEmpty {
+            searchFailure(error)
         } else if search.albums.isEmpty {
             emptySearch
         } else {
@@ -260,9 +264,23 @@ struct AudioListView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func searchFailure(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Text(message)
+                .foregroundColor(OVK.Palette.textSecondary)
+                .multilineTextAlignment(.center)
+            Button("Повторить") {
+                let query = searchText.trimmingCharacters(in: .whitespaces)
+                Task { await search.run(query: query, settings: settings) }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     // MARK: - Воспроизведение
 
-    /// `autoDownload` — true только для вкладки «Онлайн» (Мои треки): там прослушанное
+    /// `autoDownload` — true только для вкладки «Моя музыка»: там прослушанное
     /// докачивается для офлайна. Поиск/Загрузки такого не делают.
     private func tapTrack(_ track: Audio, in list: [Audio], autoDownload: Bool = false, source: String? = nil) {
         if track.isPlayable || downloads.isDownloaded(track) {

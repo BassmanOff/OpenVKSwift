@@ -76,7 +76,7 @@ final class AudioPlayer: ObservableObject {
     // MARK: - Управление
 
     /// `autoDownload` — разрешить автозагрузку при прослушивании для ЭТОЙ очереди.
-    /// true только из вкладки «Онлайн» (Мои треки); из альбомов, поиска, ленты — false,
+    /// true только из вкладки «Моя музыка»; из альбомов, поиска, ленты — false,
     /// чтобы случайное прослушивание не забивало «Загрузки».
     func play(_ audio: Audio, in list: [Audio], autoDownload: Bool = false, source: String? = nil) {
         queue = list
@@ -269,7 +269,7 @@ final class AudioPlayer: ObservableObject {
             return
         }
 
-        // Автозагрузка при прослушивании: только для очереди из вкладки «Онлайн»
+        // Автозагрузка при прослушивании: только для очереди из вкладки «Моя музыка»
         // (autoDownloadCurrentQueue), если играем из сети и включено в настройках.
         // Альбомы/поиск/лента такого не делают — не забиваем «Загрузки».
         if downloadOnPlay, autoDownloadCurrentQueue, local == nil, audio.isPlayable {

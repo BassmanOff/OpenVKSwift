@@ -69,7 +69,7 @@ struct AudioAttachPicker: View {
         } else if search.isLoading && search.tracks.isEmpty {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if search.tracks.isEmpty {
-            Text(search.errorMessage ?? "Ничего не найдено")
+            Text(search.trackErrorMessage ?? "Ничего не найдено")
                 .foregroundColor(OVK.Palette.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
