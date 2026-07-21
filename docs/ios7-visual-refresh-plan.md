@@ -150,10 +150,10 @@ traits, and label fit on an iPhone SE-width screen.
 
 #### Friends
 
-- [ ] Keep 44 pt rounded-square avatars and the blue online/platform line.
-- [ ] Unify local/global and online/offline section-header styling.
-- [ ] Use one quiet centered treatment for loading, empty, no-results, and error states.
-- [ ] During global search, retain local results and show progress without jumping rows.
+- [x] Keep 44 pt rounded-square avatars and the blue online/platform line.
+- [x] Unify local/global and online/offline section-header styling.
+- [x] Use one quiet centered treatment for loading, empty, no-results, and error states.
+- [x] During global search, retain local results and show progress without jumping rows.
 
 #### Music
 

@@ -9,19 +9,16 @@ struct FriendsView: View {
     var body: some View {
         Group {
             if model.isLoading && model.friends.isEmpty {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                FriendsStateView(message: "Загрузка друзей…", isLoading: true)
+                    .frame(maxHeight: .infinity)
             } else if let error = model.errorMessage, model.friends.isEmpty {
-                VStack(spacing: 12) {
-                    Text(error)
-                        .foregroundColor(OVK.Palette.textSecondary)
-                        .multilineTextAlignment(.center)
-                    Button("Повторить") { Task { await model.load(userID: userID, settings: settings) } }
+                FriendsStateView(message: error) {
+                    Task { await model.load(userID: userID, settings: settings) }
                 }
-                .padding()
+                .frame(maxHeight: .infinity)
             } else if model.friends.isEmpty {
-                Text("Нет друзей")
-                    .foregroundColor(OVK.Palette.textSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                FriendsStateView(message: "Нет друзей")
+                    .frame(maxHeight: .infinity)
             } else {
                 List(model.friends) { friend in
                     NavigationLink {
@@ -41,6 +38,34 @@ struct FriendsView: View {
     }
 }
 
+/// Единое спокойное состояние для вкладки друзей и списков друзей в профиле.
+struct FriendsStateView: View {
+    let message: String
+    var isLoading = false
+    var retry: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if isLoading {
+                ProgressView()
+            }
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(OVK.Palette.textSecondary)
+                .multilineTextAlignment(.center)
+            if let retry {
+                Button("Повторить", action: retry)
+                    .font(.subheadline)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 96)
+        .padding(.horizontal, OVK.Metrics.contentInset)
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(OVK.Palette.card)
+    }
+}
+
 struct FriendRow: View {
     let user: User
 
@@ -55,7 +80,7 @@ struct FriendRow: View {
             }
             .frame(width: 44, height: 44)
             .clipped()
-            .cornerRadius(4)
+            .cornerRadius(OVK.Metrics.compactCornerRadius)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.fullName)

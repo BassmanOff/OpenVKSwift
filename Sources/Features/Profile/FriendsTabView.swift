@@ -77,28 +77,26 @@ struct FriendsTabView: View {
         let offline = model.friends.filter { !$0.online }.sorted { $0.fullName < $1.fullName }
 
         if model.isLoading && model.friends.isEmpty {
-            HStack { Spacer(); ProgressView(); Spacer() }.listRowSeparator(.hidden)
+            FriendsStateView(message: "Загрузка друзей…", isLoading: true)
+        } else if let error = model.errorMessage, model.friends.isEmpty {
+            FriendsStateView(message: error) {
+                Task { await model.load(settings: settings) }
+            }
         } else if model.friends.isEmpty {
-            Text("Нет друзей")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .listRowSeparator(.hidden)
+            FriendsStateView(message: "Нет друзей")
         } else {
             if !online.isEmpty {
                 Section {
                     ForEach(online) { friendRow($0) }
                 } header: {
-                    Text("Онлайн (\(online.count))")
-                        .foregroundColor(OVK.Palette.textSecondary)
-                        .font(.footnote)
+                    sectionHeader("Онлайн (\(online.count))")
                 }
             }
             if !offline.isEmpty {
                 Section {
                     ForEach(offline) { friendRow($0) }
                 } header: {
-                    Text("Офлайн (\(offline.count))")
-                        .foregroundColor(OVK.Palette.textSecondary)
-                        .font(.footnote)
+                    sectionHeader("Офлайн (\(offline.count))")
                 }
             }
         }
@@ -108,25 +106,37 @@ struct FriendsTabView: View {
     private var searchContent: some View {
         let local = model.localMatches(model.query).sorted { $0.fullName < $1.fullName }
         if !local.isEmpty {
-            Section("Мои друзья") {
+            Section {
                 ForEach(local) { friendRow($0) }
+            } header: {
+                sectionHeader("Мои друзья")
             }
         }
         Section {
             if model.searchResults.isEmpty && local.isEmpty && !model.isSearching {
-                Text("Ничего не найдено").foregroundColor(OVK.Palette.textSecondary)
+                FriendsStateView(message: "Ничего не найдено")
             } else {
                 ForEach(model.searchResults) { friendRow($0) }
             }
         } header: {
-            HStack {
-                Text("Глобальный поиск")
-                Spacer()
-                if model.isSearching {
-                    ProgressView().scaleEffect(0.75)
-                }
+            sectionHeader("Глобальный поиск", reservesProgress: true)
+        }
+    }
+
+    private func sectionHeader(_ title: String, reservesProgress: Bool = false) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            if reservesProgress {
+                ProgressView()
+                    .scaleEffect(0.75)
+                    .opacity(model.isSearching ? 1 : 0)
+                    .frame(width: 20, height: 20)
             }
         }
+        .font(.footnote)
+        .foregroundColor(OVK.Palette.textSecondary)
+        .textCase(nil)
     }
 
     private func friendRow(_ user: User) -> some View {
