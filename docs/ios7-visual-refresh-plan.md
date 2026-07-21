@@ -191,7 +191,7 @@ Acceptance criteria:
 
 - [x] Restyle Responses/Activity as a plain full-width list with restrained section
   headers, hairlines, and flat blue actions.
-- [ ] Replace modern inset-grouped Profile information and Settings forms with full-width
+- [x] Replace modern inset-grouped Profile information and Settings forms with full-width
   rectangular white sections on gray.
 - [ ] Apply the same treatment to archived chats, album details, comments, groups,
   attachments, and other pushed screens as they are encountered.

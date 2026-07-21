@@ -228,6 +228,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .listStyle(.grouped)
             .navigationTitle("Настройки")
             .navigationBarTitleDisplayMode(.inline)
             // Пуш (не модалка) — .task перезапускается при каждом заходе,

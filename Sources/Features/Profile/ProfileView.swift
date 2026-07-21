@@ -661,7 +661,7 @@ struct ProfileAllInfoView: View {
                     .padding(.vertical, 2)
                 }
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.grouped)
             .navigationTitle("Все данные")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
