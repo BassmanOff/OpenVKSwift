@@ -189,7 +189,7 @@ Acceptance criteria:
 
 ### 5. Secondary screens
 
-- [ ] Restyle Responses/Activity as a plain full-width list with restrained section
+- [x] Restyle Responses/Activity as a plain full-width list with restrained section
   headers, hairlines, and flat blue actions.
 - [ ] Replace modern inset-grouped Profile information and Settings forms with full-width
   rectangular white sections on gray.

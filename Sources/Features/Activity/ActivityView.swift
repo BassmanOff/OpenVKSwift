@@ -54,28 +54,51 @@ struct ActivityView: View {
         } else {
             List {
                 if !model.friendRequests.isEmpty {
-                    Section("Заявки в друзья") {
-                        ForEach(model.friendRequests) { user in
-                            requestRow(user)
-                        }
+                    sectionHeader("Заявки в друзья")
+                    ForEach(model.friendRequests) { user in
+                        activityListRow { requestRow(user) }
                     }
                 }
                 if !model.notifications.isEmpty {
-                    Section("Уведомления") {
-                        ForEach(model.notifications) { notif in
-                            notificationRow(notif)
-                                .onAppear {
-                                    if notif.id == model.notifications.last?.id {
-                                        Task { await model.loadMore(settings: settings) }
-                                    }
+                    sectionHeader("Уведомления")
+                    ForEach(model.notifications) { notif in
+                        activityListRow { notificationRow(notif) }
+                            .onAppear {
+                                if notif.id == model.notifications.last?.id {
+                                    Task { await model.loadMore(settings: settings) }
                                 }
-                        }
+                            }
                     }
                 }
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
             .refreshable { await model.reload(settings: settings) }
         }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.footnote)
+            .foregroundColor(OVK.Palette.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, OVK.Metrics.contentInset)
+            .frame(height: 30)
+            .background(OVK.Palette.background)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(OVK.Palette.background)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func activityListRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, OVK.Metrics.contentInset)
+            .padding(.vertical, 6)
+            .background(OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom))
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(OVK.Palette.card)
     }
 
     // MARK: Заявка в друзья
@@ -94,11 +117,19 @@ struct ActivityView: View {
             Text(user.fullName).font(.subheadline).fontWeight(.medium).lineLimit(1)
             Spacer()
             Button("Принять") { Task { await model.accept(user, settings: settings) } }
-                .font(.caption).buttonStyle(.borderedProminent).tint(OVK.Palette.primary)
+                .font(.subheadline)
+                .foregroundColor(OVK.Palette.primary)
+                .frame(minHeight: OVK.Metrics.minimumTapSize)
+                .buttonStyle(.plain)
             Button { Task { await model.decline(user, settings: settings) } } label: {
-                Image(systemName: "xmark").font(.caption)
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(OVK.Palette.primary)
+                    .frame(width: OVK.Metrics.minimumTapSize,
+                           height: OVK.Metrics.minimumTapSize)
             }
-            .buttonStyle(.bordered).tint(.gray)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Отклонить заявку")
         }
         .padding(.vertical, 2)
     }
