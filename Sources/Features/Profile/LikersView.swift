@@ -95,8 +95,7 @@ struct LikersView: View {
     }
 
     private func open(_ user: User) {
-        guard let url = URL(string: "https://openvk.org/id\(user.id)") else { return }
-        router.open(url)
+        router.open(settings.instance.webURL.appendingPathComponent("id\(user.id)"))
     }
 }
 
@@ -129,7 +128,7 @@ final class LikersViewModel: ObservableObject {
         defer { isLoading = false }
         let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
 
-        friendIDs = await Self.friendIDs(client: client)
+        friendIDs = await Self.friendIDs(client: client, settings: settings)
         do {
             let res: ItemsResponse<User> = try await client.call(
                 "likes.getList",
@@ -149,13 +148,21 @@ final class LikersViewModel: ObservableObject {
         }
     }
 
-    private static func friendIDs(client: OVKClient) async -> Set<Int> {
+    static func clearCache() {
+        cachedFriendIDs = nil
+    }
+
+    private static func friendIDs(client: OVKClient, settings: AppSettings) async -> Set<Int> {
         if let cached = cachedFriendIDs { return cached }
         // user_id=0 → друзья текущего; берём только id.
+        let userID = settings.instance.isVepurOVK ? settings.userID.map(String.init) ?? "0" : "0"
         let res: ItemsResponse<User>? = try? await client.call(
-            "friends.get", params: ["user_id": "0", "count": "1000"]
+            "friends.get", params: ["user_id": userID, "count": "1000"]
         )
-        let ids = Set((res?.items ?? []).map(\.id))
+        var ids = Set((res?.items ?? []).map(\.id))
+        if settings.instance.isVepurOVK, let currentUserID = settings.userID {
+            ids.remove(currentUserID)
+        }
         cachedFriendIDs = ids
         return ids
     }

@@ -14,8 +14,12 @@ final class DownloadAllViewModel: ObservableObject {
 
         let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
         let tracks: [Audio]
+        var params = ["count": "100"]
+        if settings.instance.needsExplicitAudioOwner, let userID = settings.userID {
+            params["owner_id"] = String(userID)
+        }
         do {
-            let res: ItemsResponse<Audio> = try await client.call("audio.get", params: ["count": "100"])
+            let res: ItemsResponse<Audio> = try await client.call("audio.get", params: params)
             tracks = res.items
         } catch {
             progress = "Не удалось получить список"
@@ -166,8 +170,13 @@ struct SettingsView: View {
                     Toggle("Кастомные реакции", isOn: $settings.enableCustomReactions)
                 }
 
-                Section(header: Text("Плеер")) {
+                Section(
+                    header: Text("Внешний вид"),
+                    footer: Text("Возвращает квадратные аватары в профиле и записях, а также зелёную точку онлайн на аватаре профиля.")
+                ) {
                     Toggle("Плеер в стиле iOS 7", isOn: $settings.useNewPlayer)
+                    Toggle("Квадратные аватары и точка онлайн",
+                           isOn: $settings.legacyAvatarIndicators)
                 }
 
                 Section(

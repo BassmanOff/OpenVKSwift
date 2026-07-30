@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Location selected for a new wall post. OpenVK accepts these three values directly
+/// in wall.post; keeping them in the draft also preserves the selection after dismiss.
+struct PostLocationDraft: Codable, Hashable {
+    let latitude: Double
+    let longitude: Double
+    let name: String
+}
+
 /// Снимок несохранённой записи. ЕДИНСТВЕННЫЙ на всё приложение — последний
 /// закрытый композер с содержимым перезаписывает предыдущий (как «свёрнутое»
 /// приложение в Telegram: одно за раз).
@@ -17,6 +25,7 @@ struct PostDraft: Codable {
     var videos: [VideoRef]
     var docs: [Document]
     var pollDraft: PollDraft?
+    var location: PostLocationDraft?
 
     /// Минимум, нужный композеру от видео: строка вложения (превью+название)
     /// и ref для wall.post. Полный Video не Encodable (кастомный init(from:)

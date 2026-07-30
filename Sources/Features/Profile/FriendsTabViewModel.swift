@@ -17,6 +17,15 @@ final class FriendsTabViewModel: ObservableObject {
         return OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
     }
 
+    private func visibleFriends(_ users: [User], settings: AppSettings) -> [User] {
+        guard settings.instance.isVepurOVK, let currentUserID = settings.userID else { return users }
+        return users.filter { $0.id != currentUserID }
+    }
+
+    private func ownUserID(_ settings: AppSettings) -> String {
+        settings.instance.isVepurOVK ? settings.userID.map(String.init) ?? "0" : "0"
+    }
+
     func loadIfNeeded(settings: AppSettings) async {
         guard !loaded else { return }
         await load(settings: settings)
@@ -31,9 +40,9 @@ final class FriendsTabViewModel: ObservableObject {
         do {
             let res: ItemsResponse<User> = try await client.call(
                 "friends.get",
-                params: ["user_id": "0", "fields": "photo_100,photo_50,online,last_seen,screen_name", "count": "1000"]
+                params: ["user_id": ownUserID(settings), "fields": "photo_100,photo_50,online,last_seen,screen_name", "count": "1000"]
             )
-            friends = res.items
+            friends = visibleFriends(res.items, settings: settings)
             loaded = true
         } catch {
             if error.isCancellation { return }
@@ -53,9 +62,9 @@ final class FriendsTabViewModel: ObservableObject {
         do {
             let res: ItemsResponse<User> = try await client.call(
                 "friends.get",
-                params: ["user_id": "0", "fields": "photo_100,photo_50,online,last_seen,screen_name", "count": "1000"]
+                params: ["user_id": ownUserID(settings), "fields": "photo_100,photo_50,online,last_seen,screen_name", "count": "1000"]
             )
-            friends = res.items
+            friends = visibleFriends(res.items, settings: settings)
         } catch {
             if error.isCancellation { return }
             // При обновлении не затираем уже показанный список; ошибку — только на пустом экране.
@@ -72,9 +81,12 @@ final class FriendsTabViewModel: ObservableObject {
         do {
             let res: ItemsResponse<User> = try await client.call(
                 "friends.get",
-                params: ["user_id": "0", "fields": "online,last_seen", "count": "1000"]
+                params: ["user_id": ownUserID(settings), "fields": "online,last_seen", "count": "1000"]
             )
-            let freshByID = Dictionary(res.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            let freshByID = Dictionary(
+                visibleFriends(res.items, settings: settings).map { ($0.id, $0) },
+                uniquingKeysWith: { a, _ in a }
+            )
             var updated = friends
             for i in updated.indices {
                 if let fresh = freshByID[updated[i].id] {

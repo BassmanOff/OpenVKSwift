@@ -31,11 +31,10 @@ final class RepostViewModel: ObservableObject {
         }
     }
 
-    /// Отправляет ссылку на запись в ЛС (peerID == свой id — «Избранное»/себе).
-    func sendLink(post: Post, peerID: Int, settings: AppSettings) async -> Bool {
+    /// Отправляет ссылку в ЛС (peerID == свой id — «Избранное»/себе).
+    func sendLink(_ link: String, peerID: Int, settings: AppSettings) async -> Bool {
         guard let client = makeClient(settings) else { return false }
         errorMessage = nil
-        let link = "\(settings.instance.webURL.absoluteString)/wall\(post.ownerID)_\(post.postID)"
         do {
             let _: Int = try await client.call("messages.send", params: ["peer_id": String(peerID), "message": link])
             return true

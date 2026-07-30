@@ -4,16 +4,24 @@ import Security
 /// Минимальная обёртка над Keychain для хранения access_token.
 struct KeychainStore {
     private let service = "com.ovkclient.app"
-    private let account = "access_token"
+    private let activeAccount = "access_token"
 
     var token: String? {
-        get { read() }
+        get { read(account: activeAccount) }
         nonmutating set {
-            if let value = newValue { save(value) } else { delete() }
+            set(newValue, account: activeAccount)
         }
     }
 
-    private func save(_ value: String) {
+    func token(for account: SavedAccount) -> String? {
+        read(account: accountKey(account))
+    }
+
+    func setToken(_ token: String?, for account: SavedAccount) {
+        set(token, account: accountKey(account))
+    }
+
+    private func set(_ value: String?, account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -21,12 +29,13 @@ struct KeychainStore {
         ]
         SecItemDelete(query as CFDictionary)
 
+        guard let value else { return }
         var attributes = query
         attributes[kSecValueData as String] = Data(value.utf8)
         SecItemAdd(attributes as CFDictionary, nil)
     }
 
-    private func read() -> String? {
+    private func read(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -40,12 +49,7 @@ struct KeychainStore {
         return String(data: data, encoding: .utf8)
     }
 
-    private func delete() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(query as CFDictionary)
+    private func accountKey(_ account: SavedAccount) -> String {
+        "saved_account:\(account.id)"
     }
 }

@@ -16,18 +16,21 @@ final class AudioDownloadManager: ObservableObject {
 
     private let dir: URL
     private let metaURL: URL
+    private let sessionConfiguration: URLSessionConfiguration
     private var tasks: [String: URLSessionDownloadTask] = [:]
     private var pendingAudio: [String: Audio] = [:]
+    private var queue: [Audio] = []
     private lazy var session = URLSession(
-        configuration: .default,
+        configuration: sessionConfiguration,
         delegate: Coordinator(manager: self),
         delegateQueue: nil
     )
 
-    init() {
+    init(configuration: URLSessionConfiguration = .default, directory: URL? = nil) {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        dir = base.appendingPathComponent("Audio", isDirectory: true)
+        dir = directory ?? base.appendingPathComponent("Audio", isDirectory: true)
         metaURL = dir.appendingPathComponent("downloads.json")
+        sessionConfiguration = configuration
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         loadMeta()
     }
@@ -42,30 +45,30 @@ final class AudioDownloadManager: ObservableObject {
     }
 
     func download(_ audio: Audio) {
-        guard let remote = audio.playbackURL,
+        guard audio.playbackURL != nil,
               !isDownloaded(audio),
-              tasks[audio.key] == nil else { return }
+              pendingAudio[audio.key] == nil else { return }
 
-        let key = audio.key
-        inProgress.insert(key)
-        progress.values[key] = 0
-        pendingAudio[key] = audio
-        let task = session.downloadTask(with: remote)
-        task.taskDescription = key
-        tasks[key] = task
-        task.resume()
+        pendingAudio[audio.key] = audio
+        queue.append(audio)
+        startNext()
     }
 
     /// Последовательный вариант для массовой загрузки в настройках.
     func downloadAndWait(_ audio: Audio) async {
         download(audio)
-        while inProgress.contains(audio.key) && !Task.isCancelled {
+        while pendingAudio[audio.key] != nil && !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
     func cancelDownload(_ audio: Audio) {
-        tasks[audio.key]?.cancel()
+        if let task = tasks[audio.key] {
+            task.cancel()
+        } else {
+            queue.removeAll { $0.key == audio.key }
+            pendingAudio.removeValue(forKey: audio.key)
+        }
     }
 
     func remove(_ audio: Audio) {
@@ -110,9 +113,28 @@ final class AudioDownloadManager: ObservableObject {
         progress.values.removeValue(forKey: key)
         tasks.removeValue(forKey: key)
         pendingAudio.removeValue(forKey: key)
+        startNext()
     }
 
     // MARK: - Private
+
+    private func startNext() {
+        guard tasks.isEmpty, !queue.isEmpty else { return }
+        let audio = queue.removeFirst()
+        guard let remote = audio.playbackURL else {
+            pendingAudio.removeValue(forKey: audio.key)
+            startNext()
+            return
+        }
+
+        let key = audio.key
+        inProgress.insert(key)
+        progress.values[key] = 0
+        let task = session.downloadTask(with: remote)
+        task.taskDescription = key
+        tasks[key] = task
+        task.resume()
+    }
 
     private func fileURL(for audio: Audio) -> URL {
         dir.appendingPathComponent("\(audio.key).mp3")
@@ -132,6 +154,7 @@ final class AudioDownloadManager: ObservableObject {
 
     private final class Coordinator: NSObject, URLSessionDownloadDelegate {
         weak var manager: AudioDownloadManager?
+        private var temporaryURLs: [Int: URL] = [:]
 
         init(manager: AudioDownloadManager) {
             self.manager = manager
@@ -151,18 +174,19 @@ final class AudioDownloadManager: ObservableObject {
         }
 
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-            guard let key = downloadTask.taskDescription else { return }
             let temporaryURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString, isDirectory: false)
             guard (try? FileManager.default.copyItem(at: location, to: temporaryURL)) != nil else { return }
-            Task { @MainActor [weak manager] in
-                manager?.finishDownload(for: key, temporaryURL: temporaryURL)
-            }
+            temporaryURLs[downloadTask.taskIdentifier] = temporaryURL
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
             guard let key = task.taskDescription else { return }
+            let temporaryURL = temporaryURLs.removeValue(forKey: task.taskIdentifier)
             Task { @MainActor [weak manager] in
+                if let temporaryURL {
+                    manager?.finishDownload(for: key, temporaryURL: temporaryURL)
+                }
                 manager?.completeDownload(for: key)
             }
         }

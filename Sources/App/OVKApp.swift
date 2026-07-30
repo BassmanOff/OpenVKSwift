@@ -22,22 +22,29 @@ struct OVKApp: App {
             diskCapacity: 200 * 1024 * 1024      // 200 МБ
         )
 
-        // Одно и то же лёгкое стекло во всех состояниях скролла. Одинаковые standard и
-        // scrollEdge appearance не дают бару менять прозрачность/высоту на iOS 15.
+        // Оригинальный VK использовал один непрозрачный синий бар во всех состояниях
+        // прокрутки. Одинаковые appearance не дают iOS 15 менять его у края списка.
         let nav = UINavigationBarAppearance()
-        nav.configureWithTransparentBackground()
-        nav.backgroundEffect = UIBlurEffect(style: .extraLight)
-        nav.shadowColor = UIColor(OVK.Palette.separator)
+        nav.configureWithOpaqueBackground()
+        nav.backgroundColor = UIColor(OVK.Palette.primary)
+        nav.shadowColor = .clear
+        nav.titleTextAttributes = [
+            .foregroundColor: UIColor.white,
+            .font: UIFont.preferredFont(forTextStyle: .headline)
+        ]
+        nav.largeTitleTextAttributes = [
+            .foregroundColor: UIColor.white
+        ]
         UINavigationBar.appearance().standardAppearance = nav
         UINavigationBar.appearance().scrollEdgeAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav
-        UINavigationBar.appearance().tintColor = UIColor(OVK.Palette.primary)
+        UINavigationBar.appearance().tintColor = .white
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                .tint(OVK.Palette.primary)
+                .font(OVK.Typography.body)
                 .environmentObject(settings)
                 .environmentObject(player)
                 .environmentObject(downloads)

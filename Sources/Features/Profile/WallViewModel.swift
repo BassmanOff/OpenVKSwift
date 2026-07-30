@@ -73,17 +73,12 @@ final class WallViewModel: CachedListViewModel<WallViewModel.WallResponse, Post,
     // MARK: - Дисковый кэш первой страницы стены
 
     override func cacheURL(for key: Int) -> URL {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("wall_cache_\(key).json")
+        cacheScope.file("wall_cache_\(key).json")
     }
 
     /// Стирает все кэши стен (при выходе из аккаунта).
     static func clearCache() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let files = (try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil)) ?? []
-        for file in files where file.lastPathComponent.hasPrefix("wall_cache_") {
-            try? FileManager.default.removeItem(at: file)
-        }
+        AccountCacheScope.current().removeFiles(prefixes: ["wall_cache_"])
     }
 
     /// После редактирования — перечитывает одну запись (wall.getById) и подменяет её
@@ -103,6 +98,7 @@ final class WallViewModel: CachedListViewModel<WallViewModel.WallResponse, Post,
     /// Удаляет запись (wall.delete) и убирает её из списка.
     func delete(_ post: Post, settings: AppSettings) async {
         guard let token = settings.token else { return }
+        errorMessage = nil
         let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
         do {
             try await client.execute(

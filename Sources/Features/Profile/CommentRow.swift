@@ -129,7 +129,7 @@ struct CommentRow: View {
         let id = authorID ?? comment.fromID
         guard id != 0 else { return }
         let path = id > 0 ? "id\(id)" : "club\(-id)"
-        if let url = URL(string: "https://openvk.org/\(path)") { openURL(url) }
+        openURL(settings.instance.webURL.appendingPathComponent(path))
     }
 
     private static let formatter: DateFormatter = {

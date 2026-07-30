@@ -43,15 +43,21 @@ struct ActivityView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.isLoading && model.notifications.isEmpty && model.friendRequests.isEmpty {
+        if model.isLoading && model.notifications.isEmpty && model.friendRequests.isEmpty && model.birthdayFriends.isEmpty {
             OVKListStateView(message: "Загрузка уведомлений…", isLoading: true)
-        } else if model.notifications.isEmpty && model.friendRequests.isEmpty {
+        } else if model.notifications.isEmpty && model.friendRequests.isEmpty && model.birthdayFriends.isEmpty {
             OVKListStateView(
                 message: model.errorMessage ?? "Пока нет уведомлений",
                 systemImage: "bell.slash"
             )
         } else {
             List {
+                if !model.birthdayFriends.isEmpty {
+                    sectionHeader("Дни рождения")
+                    ForEach(model.birthdayFriends) { user in
+                        activityListRow { birthdayRow(user) }
+                    }
+                }
                 if !model.friendRequests.isEmpty {
                     sectionHeader("Заявки в друзья")
                     ForEach(model.friendRequests) { user in
@@ -101,6 +107,34 @@ struct ActivityView: View {
     }
 
     // MARK: Заявка в друзья
+
+    private func birthdayRow(_ user: User) -> some View {
+        Button { goProfile(user.id) } label: {
+            HStack(spacing: 10) {
+                CachedImage(url: user.avatarURL) {
+                    ZStack { OVK.Palette.background; Image(systemName: "person.crop.circle").foregroundColor(OVK.Palette.textSecondary) }
+                }
+                .frame(width: 44, height: 44)
+                .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(user.fullName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(OVK.Palette.textPrimary)
+                    Text("сегодня празднует день рождения")
+                        .font(.footnote)
+                        .foregroundColor(OVK.Palette.textSecondary)
+                }
+                Spacer()
+                Image(systemName: "gift.fill")
+                    .foregroundColor(OVK.Palette.primary)
+            }
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(user.fullName), сегодня день рождения")
+    }
 
     private func requestRow(_ user: User) -> some View {
         HStack(spacing: 10) {
@@ -302,8 +336,8 @@ struct ActivityView: View {
 
     /// Аватар → профиль автора (сквозь handlesOVKLinks).
     private func goProfile(_ id: Int) {
-        guard let url = URL(string: "https://openvk.org/\(id > 0 ? "id\(id)" : "club\(-id)")") else { return }
-        openURL(url)
+        let path = id > 0 ? "id\(id)" : "club\(-id)"
+        openURL(settings.instance.webURL.appendingPathComponent(path))
     }
 
     // RelativeDateTimeFormatter дорог — держим статически (вызывается в каждой строке).

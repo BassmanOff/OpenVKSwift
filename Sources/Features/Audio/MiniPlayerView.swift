@@ -4,6 +4,7 @@ import SwiftUI
 struct MiniPlayerView: View {
     @EnvironmentObject private var player: AudioPlayer
     @State private var extraCover: URL?
+    @State private var showStopConfirmation = false
     var onExpand: () -> Void = {}
 
     var body: some View {
@@ -36,29 +37,31 @@ struct MiniPlayerView: View {
                     .accessibilityLabel("\(track.title), \(track.artist)")
                     .accessibilityHint("Открывает плеер")
 
-                    Menu {
-                        Button(role: .destructive) { player.stop() } label: {
-                            Label("Остановить и закрыть", systemImage: "xmark")
-                        }
+                    Button {
+                        showStopConfirmation = true
                     } label: {
                         Image(systemName: "ellipsis")
-                            .frame(width: OVK.Metrics.minimumTapSize,
-                                   height: OVK.Metrics.minimumTapSize)
+                            .frame(width: OVK.Metrics.miniPlayerHeight,
+                                   height: OVK.Metrics.miniPlayerHeight)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Дополнительные действия")
 
                     Button { player.togglePlayPause() } label: {
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .frame(width: OVK.Metrics.minimumTapSize,
-                                   height: OVK.Metrics.minimumTapSize)
+                            .frame(width: OVK.Metrics.miniPlayerHeight,
+                                   height: OVK.Metrics.miniPlayerHeight)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(player.isPlaying ? "Пауза" : "Воспроизвести")
 
                     Button { player.next() } label: {
                         Image(systemName: "forward.fill")
-                            .frame(width: OVK.Metrics.minimumTapSize,
-                                   height: OVK.Metrics.minimumTapSize)
+                            .frame(width: OVK.Metrics.miniPlayerHeight,
+                                   height: OVK.Metrics.miniPlayerHeight)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Следующий трек")
@@ -74,6 +77,10 @@ struct MiniPlayerView: View {
                 let cover = await CoverArtService.shared.cover(artist: track.artist, title: track.title)
                 guard !Task.isCancelled else { return }
                 extraCover = cover
+            }
+            .confirmationDialog("Дополнительные действия", isPresented: $showStopConfirmation) {
+                Button("Остановить и закрыть", role: .destructive) { player.stop() }
+                Button("Отмена", role: .cancel) {}
             }
         }
     }

@@ -7,6 +7,8 @@ struct CommentsView: View {
     let fallbackIDs: [Int]
     /// Пост для отображения в шапке. Если не передан — загружается через wall.getById.
     var post: Post? = nil
+    /// Ссылки пушат экран в уже существующий стек; модальные вызовы создают свой.
+    var usesExistingNavigation = false
 
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var player: AudioPlayer
@@ -30,57 +32,68 @@ struct CommentsView: View {
     }
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                list
-                if !model.images.isEmpty { pendingThumbs }
-                if !model.audioTracks.isEmpty { pendingAudio }
-                if !model.videos.isEmpty { pendingVideo }
-                if !model.docs.isEmpty { pendingDocs }
-                if let groupName = model.adminGroupName { identityBar(groupName) }
-                inputBar
-            }
-            .background(OVK.Palette.background.ignoresSafeArea())
-            .navigationTitle("Комментарии")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Закрыть") { dismiss() }
+        Group {
+            if usesExistingNavigation {
+                screen
+            } else {
+                NavigationView {
+                    screen
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("Закрыть") { dismiss() }
+                            }
+                        }
                 }
-            }
-            .sheet(isPresented: $showPhotoPicker) {
-                PhotoPicker { model.addImage($0) }
-            }
-            .sheet(isPresented: $showAudioPicker) {
-                AudioAttachPicker { model.addAudio($0) }
-            }
-            .sheet(isPresented: $showVideoPicker) {
-                VideoAttachPicker { model.addVideo($0) }
-            }
-            .sheet(isPresented: $showDocPicker) {
-                DocAttachPicker { model.addDoc($0) }
-            }
-            .handlesOVKLinks() // ссылки в комментариях тоже открываются в приложении
-            .task {
-                if let post = post {
-                    model.setPost(post)
-                    await model.loadPostAuthors(settings: settings)
-                }
-                await model.loadWithFallbacks(ownerID: ownerID, postID: postID, fallbackIDs: fallbackIDs, settings: settings)
-                if displayPost == nil {
-                    await model.loadPost(ownerID: ownerID, postID: postID, settings: settings)
-                    await model.loadPostAuthors(settings: settings)
-                }
-                await model.loadGroupIdentity(ownerID: ownerID, settings: settings)
+                    .navigationViewStyle(.stack)
             }
         }
-        .navigationViewStyle(.stack)
+    }
+
+    private var screen: some View {
+        VStack(spacing: 0) {
+            list
+            if !model.images.isEmpty { pendingThumbs }
+            if !model.audioTracks.isEmpty { pendingAudio }
+            if !model.videos.isEmpty { pendingVideo }
+            if !model.docs.isEmpty { pendingDocs }
+            if let groupName = model.adminGroupName { identityBar(groupName) }
+            inputBar
+        }
+        .background(OVK.Palette.background.ignoresSafeArea())
+        .navigationTitle("Комментарии")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPicker { model.addImage($0) }
+        }
+        .sheet(isPresented: $showAudioPicker) {
+            AudioAttachPicker { model.addAudio($0) }
+        }
+        .sheet(isPresented: $showVideoPicker) {
+            VideoAttachPicker { model.addVideo($0) }
+        }
+        .sheet(isPresented: $showDocPicker) {
+            DocAttachPicker { model.addDoc($0) }
+        }
+        .handlesOVKLinks() // ссылки в комментариях тоже открываются в приложении
+        .task {
+            if let post = post {
+                model.setPost(post)
+                await model.loadPostAuthors(settings: settings)
+            } else {
+                // Ссылка на запись (в т.ч. из ЛС): сначала показываем сам пост,
+                // затем загружаем комментарии — тот же порядок, что в ленте.
+                await model.loadPost(ownerID: ownerID, postID: postID, settings: settings)
+                await model.loadPostAuthors(settings: settings)
+            }
+            await model.loadWithFallbacks(ownerID: ownerID, postID: postID, fallbackIDs: fallbackIDs, settings: settings)
+            await model.loadGroupIdentity(ownerID: ownerID, settings: settings)
+        }
     }
 
     @ViewBuilder
     private var list: some View {
         if model.isLoading && model.comments.isEmpty && displayPost == nil {
-            OVKListStateView(message: "Загрузка комментариев…", isLoading: true)
+            OVKListStateView(message: "Загрузка записи…", isLoading: true)
         } else if model.comments.isEmpty && displayPost == nil {
             OVKListStateView(message: "Пока нет комментариев")
         } else {

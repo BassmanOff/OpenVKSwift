@@ -31,7 +31,7 @@ struct NewsfeedView: View {
                 content
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(OVK.Palette.background.ignoresSafeArea())
+            .background(OVK.Palette.background)
             .navigationTitle("Новости")
             .navigationBarTitleDisplayMode(.inline)
             .pushesGlobalLinks(tab: 0) // ссылки из ленты/«Ответов» пушатся в стек этой вкладки
@@ -55,7 +55,7 @@ struct NewsfeedView: View {
                     }
                 }
             }
-            .task { await model.loadIfNeeded(settings: settings) }
+            .task { await model.loadInitial(settings: settings) }
             // Первичная загрузка активности; периодический refresh ведёт MainTabView
             // (чтобы бейдж вкладки жил независимо от того, открыта ли лента).
             .task { await activity.loadIfNeeded(settings: settings) }
@@ -69,6 +69,7 @@ struct NewsfeedView: View {
         // Явный stack-стиль: без него NavigationView в кастомном контейнере может
         // выбрать split-раскладку с некорректным позиционированием навбара (iOS 15).
         .navigationViewStyle(.stack)
+        .toast($model.actionError)
     }
 
     @ViewBuilder

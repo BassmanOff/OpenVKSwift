@@ -9,6 +9,7 @@ import Combine
 /// «В ленте пусто», а незавершённый запрос отменяется (та самая ошибка «cancelled»).
 @MainActor
 final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, Post, NewsfeedViewModel.Kind> {
+    @Published var actionError: String?
 
     /// Периодический опрос счётчиков (лайки/комменты/репосты) уже загруженных постов (60с).
     /// Как в ActivityViewModel: таймер на Main RunLoop, переживает переоценку .task.
@@ -17,6 +18,13 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
     override func loadIfNeeded(settings: AppSettings) async {
         startCountsPolling(settings: settings)
         await super.loadIfNeeded(settings: settings)
+    }
+
+    /// При первом открытии параллельно обновляет видимую ленту и кэш «Всех записей».
+    func loadInitial(settings: AppSettings) async {
+        async let visible: Void = loadIfNeeded(settings: settings)
+        async let global: Void = prefetch(.global, settings: settings)
+        _ = await (visible, global)
     }
 
     private func startCountsPolling(settings: AppSettings) {
@@ -92,7 +100,7 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
         let items: [Post]
         let profiles: [User]?
         let groups: [Community]?
-        let nextFrom: String?
+        let nextFrom: APICursor?
         enum CodingKeys: String, CodingKey {
             case items, profiles, groups
             case nextFrom = "next_from"
@@ -123,12 +131,11 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
     }
 
     override func nextCursor(from response: Response) -> String? {
-        response.nextFrom
+        response.nextFrom?.value
     }
 
     override func cacheURL(for key: Kind) -> URL {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent(key == .my ? "feed_cache_my.json" : "feed_cache_global.json")
+        cacheScope.file(key == .my ? "feed_cache_my.json" : "feed_cache_global.json")
     }
 
     // MARK: - Compatibility with view (maps items -> posts)
@@ -137,6 +144,7 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
 
     func delete(_ post: Post, settings: AppSettings) async {
         guard let token = settings.token else { return }
+        actionError = nil
         let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
         do {
             try await client.execute(
@@ -145,7 +153,7 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
             )
             items.removeAll { $0.id == post.id }
         } catch {
-            errorMessage = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
 
@@ -173,21 +181,24 @@ final class NewsfeedViewModel: CachedListViewModel<NewsfeedViewModel.Response, P
 
     /// Стирает кэш ленты (при выходе из аккаунта).
     static func clearCache() {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        try? FileManager.default.removeItem(at: base.appendingPathComponent("feed_cache_my.json"))
-        try? FileManager.default.removeItem(at: base.appendingPathComponent("feed_cache_global.json"))
+        AccountCacheScope.current().removeFiles(prefixes: ["feed_cache_"])
     }
 
     /// Фоновое обновление «моей ленты» (BGAppRefresh): тихо тянет первую страницу и кладёт
     /// в кэш, чтобы при следующем запуске пользователь сразу увидел почти свежие посты.
     func prefetchForBackground(settings: AppSettings) async {
+        await prefetch(.my, settings: settings)
+    }
+
+    private func prefetch(_ kind: Kind, settings: AppSettings) async {
         guard let token = settings.token else { return }
         let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
-        if let raw = try? await client.rawResponse("newsfeed.get", params: ["count": "25", "extended": "1"]) {
+        let method = kind == .my ? "newsfeed.get" : "newsfeed.getGlobal"
+        if let raw = try? await client.rawResponse(method, params: ["count": "25", "extended": "1"]) {
             // Кэшируем только валидный ответ (с "response"), не ошибку.
             let data = Data(raw.utf8)
             if let _: Response = try? OVKClient.decode(data) {
-                saveCache(data)
+                try? data.write(to: cacheURL(for: kind), options: .atomic)
             }
         }
     }

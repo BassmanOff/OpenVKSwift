@@ -1,8 +1,6 @@
 import SwiftUI
-import UIKit
 
 /// Лёгкое молочно-белое стекло в стиле экрана нового плеера.
-/// Не меняет effect при обновлениях SwiftUI — это важно для плавности прокрутки.
 struct LightGlassBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -11,17 +9,9 @@ struct LightGlassBackground: View {
         if reduceTransparency || contrast == .increased {
             Color.white
         } else {
-            LightGlassEffect()
+            Rectangle().fill(.thinMaterial)
         }
     }
-}
-
-private struct LightGlassEffect: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        UIVisualEffectView(effect: UIBlurEffect(style: .extraLight))
-    }
-
-    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
 }
 
 /// Единый разделитель толщиной в один физический пиксель.
@@ -62,6 +52,7 @@ extension View {
 struct OVKSegmentedControl<Selection: Hashable>: View {
     let options: [(value: Selection, title: String)]
     @Binding var selection: Selection
+    var floatsOverPage = false
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
@@ -81,6 +72,7 @@ struct OVKSegmentedControl<Selection: Hashable>: View {
                 RoundedRectangle(cornerRadius: OVK.Metrics.compactCornerRadius)
                     .stroke(OVK.Palette.primary, lineWidth: 1 / displayScale)
             }
+            .frame(maxHeight: .infinity, alignment: floatsOverPage ? .top : .center)
 
             HStack(spacing: 0) {
                 ForEach(options.indices, id: \.self) { index in
@@ -98,7 +90,14 @@ struct OVKSegmentedControl<Selection: Hashable>: View {
         }
         .frame(height: OVK.Metrics.minimumTapSize)
         .padding(.horizontal, OVK.Metrics.contentInset)
-        .background(OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom))
+        .background {
+            if floatsOverPage {
+                OVK.Palette.background
+            } else {
+                OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom)
+            }
+        }
+        .padding(.top, floatsOverPage ? OVK.Metrics.sectionSpacing : 0)
     }
 
     private func visualSegment(_ option: (value: Selection, title: String)) -> some View {
@@ -117,13 +116,14 @@ struct OVKSegmentedControl<Selection: Hashable>: View {
 struct OVKSearchStrip: View {
     @Binding var text: String
     let prompt: String
+    var floatsOverPage = false
     @FocusState private var isFocused: Bool
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: OVK.Metrics.controlCornerRadius)
-                .fill(OVK.Palette.background)
+                .fill(floatsOverPage ? OVK.Palette.card : OVK.Palette.background)
                 .frame(height: 32)
                 .overlay {
                     RoundedRectangle(cornerRadius: OVK.Metrics.controlCornerRadius)
@@ -161,8 +161,15 @@ struct OVKSearchStrip: View {
             .padding(.leading, 9)
         }
         .padding(.horizontal, 8)
-        .frame(height: OVK.Metrics.minimumTapSize)
-        .background(OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom))
+        .frame(height: 32)
+        .frame(height: OVK.Metrics.minimumTapSize, alignment: floatsOverPage ? .bottom : .center)
+        .background {
+            if floatsOverPage {
+                OVK.Palette.background
+            } else {
+                OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom)
+            }
+        }
     }
 }
 

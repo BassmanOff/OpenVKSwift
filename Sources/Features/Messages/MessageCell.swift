@@ -29,10 +29,11 @@ func messageImageURL(in text: String) -> (url: URL, caption: String)? {
     let split = trimmed.rangeOfCharacter(from: .whitespacesAndNewlines)
     let urlToken = split.map { String(trimmed[..<$0.lowerBound]) } ?? trimmed
     let caption = split.map { String(trimmed[$0.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
-    // Любой хост в домене openvk (cdn./api./web/голый) — фото-ссылки OpenVK строятся от
-    // хоста запроса (HTTP_HOST), поэтому наши загрузки прилетают не только с cdn., но и с api.
+    // Фото-ссылки строятся от HTTP_HOST и могут приходить с web/api/CDN-поддоменов.
+    let serviceDomains = ["openvk.org", "openvk.xyz", "vepurovk.xyz", "vepurovk.fun"]
     guard let url = URL(string: urlToken), let host = url.host?.lowercased(),
-          host.hasSuffix("openvk.org") || host.hasSuffix("openvk.xyz") else { return nil }
+          serviceDomains.contains(where: { host == $0 || host.hasSuffix(".\($0)") })
+    else { return nil }
     let ext = url.pathExtension.lowercased()
     guard ["jpg", "jpeg", "png", "gif", "webp"].contains(ext) else { return nil }
     return (url, caption)
@@ -86,9 +87,28 @@ extension MessagePostPreview {
         }
         return MessagePostPreview(
             authorName: authorName, authorAvatarURL: authorAvatar,
-            thumbURL: post.photos.first?.bestURL, thumbAspectRatio: post.photos.first?.aspectRatio,
-            snippet: String(post.text.prefix(140))
+            thumbURL: (post.photos.first ?? post.repost?.photos.first)?.bestURL,
+            thumbAspectRatio: (post.photos.first ?? post.repost?.photos.first)?.aspectRatio,
+            snippet: String((post.text.isEmpty ? post.repost?.text ?? "" : post.text).prefix(140))
         )
+    }
+}
+
+struct MessageAudioPreview {
+    let track: Audio
+    let coverURL: URL?
+
+    static func resolve(databaseID: Int, settings: AppSettings) async -> MessageAudioPreview? {
+        guard let track = await ObjectResolver.shared.audio(databaseID: databaseID, settings: settings) else {
+            return nil
+        }
+        let cover: URL?
+        if let albumCover = track.coverURL {
+            cover = albumCover
+        } else {
+            cover = await CoverArtService.shared.cover(artist: track.artist, title: track.title)
+        }
+        return MessageAudioPreview(track: track, coverURL: cover)
     }
 }
 
@@ -185,6 +205,8 @@ final class MessageCell: UICollectionViewCell {
     var onLongPress: (() -> Void)?
     var onReact: ((String) -> Void)?
     var onOpenURL: ((URL) -> Void)?
+    var onPlayAudio: ((Audio) -> Void)?
+    var audioMenuProvider: ((Audio) -> UIMenu)?
     /// Тап по фото-баблу: URL картинки + её view (для «вылета» в полноэкранный просмотрщик).
     var onOpenImage: ((URL, UIView) -> Void)?
 
@@ -208,6 +230,8 @@ final class MessageCell: UICollectionViewCell {
     private var postThumbLoadTask: Task<Void, Never>?
     private var currentPostThumbURL: URL?
     private var currentPostCardURL: URL?
+    private var currentAudioTrack: Audio?
+    private var currentCardIsAudio = false
     /// true — тумбнейл сейчас показывает РЕАЛЬНОЕ фото поста (не аватар автора-фолбэк).
     /// В этом случае тумбнейл рисуется как обычное фото-сообщение (photoSize, тап — во
     /// весь экран через onOpenImage), а не как маленькая иконка карточки.
@@ -418,6 +442,7 @@ final class MessageCell: UICollectionViewCell {
         postCard.isUserInteractionEnabled = true
         postCard.translatesAutoresizingMaskIntoConstraints = false
         postCard.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(postCardTapped(_:))))
+        postCard.addInteraction(UIContextMenuInteraction(delegate: self))
         bubble.addSubview(postCard)
 
         postAccentBar.layer.cornerRadius = 1.5
@@ -487,13 +512,19 @@ final class MessageCell: UICollectionViewCell {
 
     func configure(text: String, date: Int, isOut: Bool, status: MessageDelivery?,
                    reactions: [(emoji: String, count: Int, mine: Bool)], width: CGFloat,
-                   postPreview: MessagePostPreview? = nil, useFullPostCard: Bool = false) {
+                   postPreview: MessagePostPreview? = nil, audioPreview: MessageAudioPreview? = nil,
+                   useFullPostCard: Bool = false) {
         widthConstraint.constant = width
         NSLayoutConstraint.deactivate(incoming + outgoing)
         NSLayoutConstraint.activate(isOut ? outgoing : incoming)
         column.alignment = isOut ? .trailing : .leading
 
         bubble.backgroundColor = isOut ? OVKUI.primary : OVKUI.card
+        postCard.isAccessibilityElement = false
+        postCard.accessibilityLabel = nil
+        postCard.accessibilityHint = nil
+        currentAudioTrack = nil
+        currentCardIsAudio = false
 
         if let wallPost = messageWallPost(in: text) {
             currentPostCardURL = wallPost.url
@@ -541,7 +572,56 @@ final class MessageCell: UICollectionViewCell {
             postAuthorLabel.text = postPreview?.authorName ?? "Запись"
             postSnippetLabel.text = postPreview.map { $0.snippet.isEmpty ? "Запись" : $0.snippet } ?? ""
             let thumbSize = hasRealPhoto ? max(photoBox.width, photoBox.height) : (useFullPostCard ? Self.postFullThumbSize : Self.postCompactThumbSize)
+            postThumbView.backgroundColor = OVKUI.background
             loadPostThumb(postPreview?.thumbURL ?? postPreview?.authorAvatarURL, maxPixel: thumbSize * UIScreen.main.scale)
+        } else if let audio = messageAudioLink(in: text) {
+            currentPostCardURL = audio.url
+            currentAudioTrack = audioPreview?.track
+            currentCardIsAudio = true
+            postThumbIsRealPhoto = false
+            NSLayoutConstraint.deactivate(activeContentMode)
+            NSLayoutConstraint.activate(postCardCompactMode)
+            activeContentMode = postCardCompactMode
+            postCard.isHidden = false
+            postAccentBar.isHidden = true
+            photoImageView.isHidden = true
+            textView.isHidden = true
+            cancelPhotoLoad()
+            cancelPostThumbLoad()
+
+            postCard.backgroundColor = isOut ? OVKUI.primaryDark : OVKUI.background
+            postAuthorLabel.textColor = isOut ? .white : OVKUI.textPrimary
+            postSnippetLabel.textColor = isOut ? UIColor.white.withAlphaComponent(0.85) : OVKUI.link
+            let track = audioPreview?.track
+            postAuthorLabel.text = track?.title ?? audio.title
+            let artist = track?.artist ?? audio.artist
+            postSnippetLabel.text = track.map {
+                "\($0.artist) · \($0.durationText)"
+            } ?? (artist.isEmpty ? "Загрузка аудиозаписи…" : artist)
+            postSnippetLabel.numberOfLines = 1
+            if let cover = audioPreview?.coverURL {
+                postThumbView.contentMode = .scaleAspectFill
+                postThumbView.backgroundColor = OVKUI.background
+                loadPostThumb(cover, maxPixel: Self.postCompactThumbSize * UIScreen.main.scale)
+            } else {
+                cancelPostThumbLoad()
+                postThumbView.contentMode = .center
+                postThumbView.backgroundColor = isOut
+                    ? UIColor.white.withAlphaComponent(0.12)
+                    : OVKUI.primary.withAlphaComponent(0.10)
+                postThumbView.tintColor = isOut ? .white : OVKUI.primary
+                postThumbView.image = UIImage(
+                    systemName: track == nil ? "music.note" : "play.circle.fill",
+                    withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .medium)
+                )
+            }
+            postCard.isAccessibilityElement = true
+            postCard.accessibilityLabel = [
+                track?.title ?? audio.title, track?.artist ?? audio.artist
+            ].filter { !$0.isEmpty }.joined(separator: ", ")
+            postCard.accessibilityHint = track == nil
+                ? "Аудиозапись загружается"
+                : "Воспроизводит аудиозапись"
         } else if let (imageURL, caption) = messageImageURL(in: text) {
             let mode = caption.isEmpty ? photoMode : photoCaptionMode
             NSLayoutConstraint.deactivate(activeContentMode)
@@ -617,6 +697,7 @@ final class MessageCell: UICollectionViewCell {
 
     @objc private func longPressed(_ gr: UILongPressGestureRecognizer) {
         guard gr.state == .began else { return }
+        if currentCardIsAudio, postCard.frame.contains(gr.location(in: bubble)) { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         onLongPress?()
     }
@@ -631,6 +712,10 @@ final class MessageCell: UICollectionViewCell {
     /// достаточно, различаем по координате тапа, не заводя отдельный recognizer на тумбнейл
     /// (который иначе конфликтовал бы с этим же в режиме без фото).
     @objc private func postCardTapped(_ gr: UITapGestureRecognizer) {
+        if currentCardIsAudio {
+            if let currentAudioTrack { onPlayAudio?(currentAudioTrack) }
+            return
+        }
         if postThumbIsRealPhoto, let currentPostThumbURL {
             let point = gr.location(in: postCard)
             if postThumbView.frame.contains(point) {
@@ -755,5 +840,16 @@ extension MessageCell: UITextViewDelegate {
                   in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
         if interaction == .invokeDefaultAction { onOpenURL?(URL) }
         return false
+    }
+}
+
+extension MessageCell: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard currentCardIsAudio, let track = currentAudioTrack,
+              let menu = audioMenuProvider?(track) else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menu }
     }
 }

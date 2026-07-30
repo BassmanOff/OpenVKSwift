@@ -67,11 +67,13 @@ final class LinkRouter: ObservableObject {
     }
 }
 
-/// Разбирает ссылки OpenVK (openvk.org / openvk.xyz / ovk.to) в места назначения.
+/// Разбирает ссылки OpenVK/VepurOVK в места назначения.
 enum LinkParser {
     fileprivate static let hosts: Set<String> = [
         "openvk.org", "www.openvk.org", "m.openvk.org",
         "openvk.xyz", "www.openvk.xyz",
+        "vepurovk.xyz", "www.vepurovk.xyz", "m.vepurovk.xyz",
+        "api.vepurovk.fun",
         "ovk.to", "www.ovk.to"
     ]
 

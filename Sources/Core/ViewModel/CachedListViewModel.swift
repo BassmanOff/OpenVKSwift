@@ -17,6 +17,7 @@ class CachedListViewModel<PageResponse: Decodable, Item: Identifiable, CacheKey:
 
     private var nextCursor: String?
     private var generation = 0
+    let cacheScope = AccountCacheScope.current()
     var pageSize: Int { 20 }
 
     init(pageSize: Int = 20) {}

@@ -22,6 +22,10 @@ final class NewPostViewModel: ObservableObject {
     /// Максимум одно голосование на пост (как в VK/OpenVK). Создаётся на сервере только
     /// при публикации — см. publish().
     @Published var pollDraft: PollDraft?
+    /// wall.edit не поддерживает геометку: новую можно добавить только при создании,
+    /// а у редактируемой записи показываем исходную без возможности изменить.
+    @Published var location: PostLocationDraft?
+    @Published var existingGeo: Post.Geo?
     @Published var isPosting = false
     @Published var errorMessage: String?
 
@@ -49,6 +53,7 @@ final class NewPostViewModel: ObservableObject {
         videos = post.videos
         docs = post.docs
         existingPoll = post.poll
+        existingGeo = post.geo
     }
 
     // MARK: - Черновик (PostDraftManager)
@@ -73,7 +78,8 @@ final class NewPostViewModel: ObservableObject {
             audioTracks: audioTracks,
             videos: videos.map { PostDraft.VideoRef(videoID: $0.videoID, ownerID: $0.ownerID, title: $0.title, imageURL: $0.imageURL) },
             docs: docs,
-            pollDraft: pollDraft
+            pollDraft: pollDraft,
+            location: location
         )
     }
 
@@ -86,6 +92,7 @@ final class NewPostViewModel: ObservableObject {
         videos = draft.videos.map(Video.init(ref:))
         docs = draft.docs
         pollDraft = draft.pollDraft
+        location = draft.location
     }
 
     var canPost: Bool {
@@ -188,13 +195,21 @@ final class NewPostViewModel: ObservableObject {
             let attachments = try await buildAttachments(client: client)
             try await client.execute(
                 "wall.post",
-                params: [
+                params: {
+                    var params = [
                     "owner_id": String(ownerID),
                     "message": text,
                     "attachments": attachments.joined(separator: ","),
                     "from_group": fromGroup ? "1" : "0",
                     "signed": signed ? "1" : "0"
-                ]
+                    ]
+                    if let location {
+                        params["lat"] = String(location.latitude)
+                        params["long"] = String(location.longitude)
+                        params["place_name"] = location.name
+                    }
+                    return params
+                }()
             )
             return true
         } catch {

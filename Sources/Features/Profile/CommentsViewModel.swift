@@ -152,10 +152,12 @@ final class CommentsViewModel: ObservableObject {
     /// Используется когда пост не передан вызывающим кодом (например, из ActivityView).
     func loadPost(ownerID: Int, postID: Int, settings: AppSettings) async {
         guard let client = client(settings) else { return }
+        isLoading = true
+        defer { isLoading = false }
         do {
             let res: WallResponse = try await client.call(
                 "wall.getById",
-                params: ["posts": "\(ownerID)_\(postID)"]
+                params: ["posts": "\(ownerID)_\(postID)", "extended": "1"]
             )
             if let fetchedPost = res.items.first {
                 self.post = fetchedPost

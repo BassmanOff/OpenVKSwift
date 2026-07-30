@@ -7,13 +7,16 @@ struct ChatScreen: UIViewControllerRepresentable {
     let model: ChatViewModel
     let peerID: Int
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var library: LibraryManager
     var onToast: (String) -> Void
     var onOpenURL: (URL) -> Void
     var onOpenImage: (URL, UIView) -> Void
     var onAttach: () -> Void
 
     func makeUIViewController(context: Context) -> ChatScreenController {
-        ChatScreenController(model: model, settings: settings, peerID: peerID,
+        ChatScreenController(model: model, settings: settings, player: player, library: library,
+                             peerID: peerID,
                              onToast: onToast, onOpenURL: onOpenURL, onOpenImage: onOpenImage,
                              onAttach: onAttach)
     }
@@ -41,6 +44,8 @@ struct ChatScreen: UIViewControllerRepresentable {
 final class ChatScreenController: UIViewController {
     private let model: ChatViewModel
     private let settings: AppSettings
+    private let player: AudioPlayer
+    private let library: LibraryManager
     private let peerID: Int
     var onToast: (String) -> Void
     var onOpenURL: (URL) -> Void
@@ -69,6 +74,7 @@ final class ChatScreenController: UIViewController {
     /// зависит (см. MessageCell), поэтому приход превью просто перерисовывает содержимое
     /// строки, а не меняет layout.
     private var postPreviews: [String: MessagePostPreview] = [:]
+    private var audioPreviews: [Int: MessageAudioPreview] = [:]
     private var pendingPreviewKeys: Set<String> = []
     /// Компакт/развёрнутая карточка — тумблер в настройках; при его смене высоты карточек
     /// меняются, heightCache для них должен сброситься.
@@ -97,11 +103,14 @@ final class ChatScreenController: UIViewController {
     private var modelSink: AnyCancellable?
     private var reloadScheduled = false
 
-    init(model: ChatViewModel, settings: AppSettings, peerID: Int,
+    init(model: ChatViewModel, settings: AppSettings, player: AudioPlayer,
+         library: LibraryManager, peerID: Int,
          onToast: @escaping (String) -> Void, onOpenURL: @escaping (URL) -> Void,
          onOpenImage: @escaping (URL, UIView) -> Void, onAttach: @escaping () -> Void) {
         self.model = model
         self.settings = settings
+        self.player = player
+        self.library = library
         self.peerID = peerID
         self.onToast = onToast
         self.onOpenURL = onOpenURL
@@ -527,6 +536,7 @@ final class ChatScreenController: UIViewController {
         case .pending(let p): text = p.text
         }
         let preview = resolvePostPreview(for: text, rowID: row.id, triggerLoad: triggerLoad)
+        let audioPreview = resolveAudioPreview(for: text, rowID: row.id, triggerLoad: triggerLoad)
         let useFullCard = settings.messagePostFullCard
 
         switch row {
@@ -534,7 +544,8 @@ final class ChatScreenController: UIViewController {
             let status: MessageDelivery? = m.isOut ? (m.id <= model.outRead ? .read : .sent) : nil
             cell.configure(text: m.text, date: m.date, isOut: m.isOut, status: status,
                            reactions: reactionGroups(model.reactions[m.id], myID: myID), width: width,
-                           postPreview: preview, useFullPostCard: useFullCard)
+                           postPreview: preview, audioPreview: audioPreview,
+                           useFullPostCard: useFullCard)
             cell.onLongPress = { [weak self, weak cell] in self?.presentMenu(message: m, cell: cell) }
             cell.onReact = { [weak self] emoji in
                 guard let self else { return }
@@ -543,12 +554,18 @@ final class ChatScreenController: UIViewController {
         case .pending(let p):
             cell.configure(text: p.text, date: p.date, isOut: true,
                            status: p.failed ? .failed : .sending, reactions: [], width: width,
-                           postPreview: preview, useFullPostCard: useFullCard)
+                           postPreview: preview, audioPreview: audioPreview,
+                           useFullPostCard: useFullCard)
             cell.onLongPress = nil
             cell.onReact = nil
         }
         cell.onOpenURL = { [weak self] url in self?.onOpenURL(url) }
         cell.onOpenImage = { [weak self] url, view in self?.onOpenImage(url, view) }
+        cell.onPlayAudio = { [weak self] track in self?.playAudio(track) }
+        let pageURL = messageAudioLink(in: text)?.url
+        cell.audioMenuProvider = { [weak self] track in
+            self?.makeAudioMenu(track, pageURL: pageURL) ?? UIMenu()
+        }
     }
 
     /// Превью карточки ссылки-на-запись. `triggerLoad` false — только чтение уже
@@ -571,6 +588,46 @@ final class ChatScreenController: UIViewController {
             self.reconfigureRow(id: rowID)
         }
         return nil
+    }
+
+    private func resolveAudioPreview(
+        for text: String, rowID: String, triggerLoad: Bool
+    ) -> MessageAudioPreview? {
+        guard let audio = messageAudioLink(in: text) else { return nil }
+        if let cached = audioPreviews[audio.databaseID] { return cached }
+        let key = "audio:\(audio.databaseID)"
+        guard triggerLoad, !pendingPreviewKeys.contains(key) else { return nil }
+        pendingPreviewKeys.insert(key)
+        Task { [weak self] in
+            guard let self else { return }
+            let resolved = await MessageAudioPreview.resolve(
+                databaseID: audio.databaseID, settings: self.settings
+            )
+            self.pendingPreviewKeys.remove(key)
+            guard let resolved else { return }
+            self.audioPreviews[audio.databaseID] = resolved
+            self.reconfigureRow(id: rowID)
+        }
+        return nil
+    }
+
+    private func playAudio(_ track: Audio) {
+        guard player.isAvailable(track) else {
+            onToast("Эта аудиозапись сейчас недоступна")
+            return
+        }
+        if player.current?.id == track.id {
+            player.togglePlayPause()
+        } else {
+            player.play(track, in: [track], source: "Сообщения")
+        }
+    }
+
+    private func makeAudioMenu(_ track: Audio, pageURL: URL?) -> UIMenu {
+        audioContextMenu(
+            track: track, player: player, library: library, settings: settings,
+            openPage: pageURL.map { url in { [weak self] in self?.onOpenURL(url) } }
+        )
     }
 
     /// Перерисовывает ОДНУ строку (пришло превью карточки записи). Высота карточки теперь

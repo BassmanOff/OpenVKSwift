@@ -41,29 +41,46 @@ final class ConversationsViewModel: ObservableObject {
     }
     /// id последнего просмотренного сообщения по диалогам (живёт между запусками).
     private var seenLastID: [Int: Int]
-    private static let seenKey = "msg_seen_last_ids"
+    private let seenKey: String
 
     // MARK: - Закреплённые / архивные (чисто локально — сервер OpenVK этого не поддерживает:
     // ни pin/archive метода в Messages API, ни колонки в Correspondence — проверено по исходникам).
 
     /// Порядок закреплённых диалогов (peerID), верх списка — первый элемент.
     @Published private(set) var pinnedOrder: [Int] {
-        didSet { UserDefaults.standard.set(pinnedOrder, forKey: Self.pinnedKey) }
+        didSet { UserDefaults.standard.set(pinnedOrder, forKey: pinnedKey) }
     }
     /// Архивные диалоги (peerID).
     @Published private(set) var archived: Set<Int> {
-        didSet { UserDefaults.standard.set(Array(archived), forKey: Self.archivedKey) }
+        didSet { UserDefaults.standard.set(Array(archived), forKey: archivedKey) }
     }
-    private static let pinnedKey = "msg_pinned_order"
-    private static let archivedKey = "msg_archived_peers"
+    private let pinnedKey: String
+    private let archivedKey: String
+    private let cacheScope: AccountCacheScope
 
     init() {
-        let raw = (UserDefaults.standard.dictionary(forKey: Self.seenKey) as? [String: Int]) ?? [:]
+        let scope = AccountCacheScope.current()
+        cacheScope = scope
+        seenKey = scope.defaultsKey("msg_seen_last_ids")
+        pinnedKey = scope.defaultsKey("msg_pinned_order")
+        archivedKey = scope.defaultsKey("msg_archived_peers")
+        let defaults = UserDefaults.standard
+        for (legacy, scoped) in [
+            ("msg_seen_last_ids", seenKey),
+            ("msg_pinned_order", pinnedKey),
+            ("msg_archived_peers", archivedKey)
+        ] where defaults.object(forKey: scoped) == nil {
+            if let value = defaults.object(forKey: legacy) {
+                defaults.set(value, forKey: scoped)
+                defaults.removeObject(forKey: legacy)
+            }
+        }
+        let raw = (defaults.dictionary(forKey: seenKey) as? [String: Int]) ?? [:]
         seenLastID = Dictionary(uniqueKeysWithValues: raw.compactMap { key, value in
             Int(key).map { ($0, value) }
         })
-        pinnedOrder = (UserDefaults.standard.array(forKey: Self.pinnedKey) as? [Int]) ?? []
-        archived = Set((UserDefaults.standard.array(forKey: Self.archivedKey) as? [Int]) ?? [])
+        pinnedOrder = (defaults.array(forKey: pinnedKey) as? [Int]) ?? []
+        archived = Set((defaults.array(forKey: archivedKey) as? [Int]) ?? [])
     }
 
     var pinnedConversations: [Conversation] {
@@ -99,6 +116,7 @@ final class ConversationsViewModel: ObservableObject {
             archived.insert(peerID)
             pinnedOrder.removeAll { $0 == peerID }
         }
+        saveCache(DialogsCache(conversations: conversations, authors: authors))
     }
 
     /// Перестановка закреплённых из нативного edit mode (.onMove). Индексы приходят
@@ -123,7 +141,7 @@ final class ConversationsViewModel: ObservableObject {
         if let lastID = conversations.first(where: { $0.peerID == peer })?.lastMessage?.id {
             seenLastID[peer] = lastID
             let raw = Dictionary(uniqueKeysWithValues: seenLastID.map { (String($0.key), $0.value) })
-            UserDefaults.standard.set(raw, forKey: Self.seenKey)
+            UserDefaults.standard.set(raw, forKey: seenKey)
         }
     }
 
@@ -183,10 +201,11 @@ final class ConversationsViewModel: ObservableObject {
     func load(settings: AppSettings) async {
         guard let token = settings.token else { return }
         // Мгновенно показываем кэш (в т.ч. офлайн), потом обновляем сетью.
-        if conversations.isEmpty, let cached = Self.loadCache() {
+        if conversations.isEmpty, let cached = loadCache() {
             conversations = cached.conversations
             authors = cached.authors
         }
+        mergeAuthors([], currentUserID: settings.userID)
         // Реентрантность: load зовут 60с-таймер, pull-to-refresh и ретрай ошибки.
         // Без гварда накладываются параллельные getConversations (каждый ~7с на сервере)
         // и дерутся за 6 соединений к хосту. Гвард ПОСЛЕ показа кэша — кэш-кадр не теряем.
@@ -204,14 +223,16 @@ final class ConversationsViewModel: ObservableObject {
                 "messages.getConversations",
                 params: ["count": String(fetchLimit), "extended": "1"]
             )
-            for u in res.profiles ?? [] {
-                authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
-            }
-            conversations = res.items
+            mergeAuthors(res.profiles ?? [], currentUserID: settings.userID)
+            conversations = Conversation.merging(
+                fresh: res.items,
+                cached: conversations,
+                retaining: archived
+            )
             totalCount = res.count
-            canLoadMore = conversations.count < (totalCount ?? 0)
-            await ensurePinnedLoaded(settings: settings)
-            Self.saveCache(DialogsCache(conversations: conversations, authors: authors))
+            canLoadMore = res.items.count < (totalCount ?? 0)
+            await ensureStoredDialogsLoaded(settings: settings)
+            saveCache(DialogsCache(conversations: conversations, authors: authors))
         } catch {
             if error.isCancellation { return }
             // Оффлайн/ошибка: если есть кэш — молча оставляем его.
@@ -231,21 +252,20 @@ final class ConversationsViewModel: ObservableObject {
             "messages.getHistory",
             params: ["peer_id": String(peerID), "count": "1", "extended": "1"]
         ), let msg = res.items.first else { return }
-        for u in res.profiles ?? [] {
-            authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
-        }
+        mergeAuthors(res.profiles ?? [], currentUserID: settings.userID)
         conversations.removeAll { $0.peerID == peerID }
         // Новое сообщение = самый свежий диалог — в начало (сервер сортирует так же).
         // unreadCount: 1 для входящего повторяет серверную семантику (максимум 1).
         conversations.insert(Conversation(peerID: peerID, unreadCount: msg.isOut ? 0 : 1, lastMessage: msg), at: 0)
-        Self.saveCache(DialogsCache(conversations: conversations, authors: authors))
+        saveCache(DialogsCache(conversations: conversations, authors: authors))
     }
 
-    /// Закреплённый диалог может не попасть в загруженную страницу (пагинация — по свежести,
-    /// а закреплённый мог давно молчать). Догружаем недостающих напрямую по peer_id и
-    /// вклеиваем — иначе они молча пропадали бы из «закреплённых» до случайной догрузки страницы.
-    private func ensurePinnedLoaded(settings: AppSettings) async {
-        let missing = pinnedOrder.filter { id in !conversations.contains { $0.peerID == id } }
+    /// Закреплённый или архивный диалог может не попасть в загруженную страницу
+    /// (пагинация — по свежести). Догружаем недостающих напрямую по peer_id и вклеиваем,
+    /// чтобы локальные разделы не зависели от короткой первой страницы сервера.
+    private func ensureStoredDialogsLoaded(settings: AppSettings) async {
+        let stored = Set(pinnedOrder).union(archived)
+        let missing = stored.filter { id in !conversations.contains { $0.peerID == id } }
         guard !missing.isEmpty, let token = settings.token else { return }
         let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
         // Параллельно: N последовательных round-trip'ов схлопываются в один самый долгий.
@@ -263,10 +283,8 @@ final class ConversationsViewModel: ObservableObject {
             return out
         }
         for (peerID, res) in results {
-            for u in res.profiles ?? [] {
-                authors[u.id] = WallViewModel.Author(name: u.fullName, avatar: u.avatarURL)
-            }
-            // unreadCount: 0 — закреплённый диалог без данных о непрочитанности лучше
+            mergeAuthors(res.profiles ?? [], currentUserID: settings.userID)
+            // unreadCount: 0 — локально сохранённый диалог без данных о непрочитанности лучше
             // считать прочитанным, чем неверно раздувать бейдж по недостающим данным.
             conversations.append(Conversation(peerID: peerID, unreadCount: 0, lastMessage: res.items.first))
         }
@@ -290,27 +308,40 @@ final class ConversationsViewModel: ObservableObject {
         let authors: [Int: WallViewModel.Author]
     }
 
-    private static let cacheURL: URL = {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("dialogs_cache.json")
-    }()
-
-    private static func saveCache(_ cache: DialogsCache) {
+    private func saveCache(_ cache: DialogsCache) {
         if let data = try? JSONEncoder().encode(cache) {
-            try? data.write(to: cacheURL, options: .atomic)
+            try? data.write(to: cacheScope.file("dialogs_cache.json"), options: .atomic)
         }
     }
 
-    private static func loadCache() -> DialogsCache? {
-        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
+    private func loadCache() -> DialogsCache? {
+        guard let data = try? Data(contentsOf: cacheScope.file("dialogs_cache.json")) else { return nil }
         return try? JSONDecoder().decode(DialogsCache.self, from: data)
+    }
+
+    private func mergeAuthors(_ profiles: [User], currentUserID: Int?) {
+        for user in profiles {
+            authors[user.id] = WallViewModel.Author(
+                name: ConversationIdentity.title(
+                    peerID: user.id, currentUserID: currentUserID, fallback: user.fullName
+                ),
+                avatar: user.avatarURL
+            )
+        }
+        if let currentUserID {
+            authors[currentUserID] = WallViewModel.Author(
+                name: "Избранное", avatar: authors[currentUserID]?.avatar
+            )
+        }
     }
 
     /// Стирает кэш (при выходе из аккаунта — это личные данные).
     static func clearCache() {
-        try? FileManager.default.removeItem(at: cacheURL)
-        UserDefaults.standard.removeObject(forKey: pinnedKey)
-        UserDefaults.standard.removeObject(forKey: archivedKey)
+        let scope = AccountCacheScope.current()
+        scope.removeFiles(prefixes: ["dialogs_cache.json"])
+        UserDefaults.standard.removeObject(forKey: scope.defaultsKey("msg_seen_last_ids"))
+        UserDefaults.standard.removeObject(forKey: scope.defaultsKey("msg_pinned_order"))
+        UserDefaults.standard.removeObject(forKey: scope.defaultsKey("msg_archived_peers"))
     }
 }
 
@@ -330,7 +361,7 @@ struct ConversationsView: View {
         NavigationView {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(OVK.Palette.background.ignoresSafeArea())
+                .background(OVK.Palette.background)
                 .navigationTitle("Сообщения")
                 .navigationBarTitleDisplayMode(.inline)
                 .pushesGlobalLinks(tab: 1) // ссылки из диалогов пушатся в стек этой вкладки
@@ -436,7 +467,6 @@ struct ConversationsView: View {
                 // Закреплённые — обычные строки этого же списка (просто первые),
                 // скроллятся вместе со всем остальным.
                 if !model.pinnedConversations.isEmpty {
-                    pinnedLabel
                     PinnedConversationsSection(model: model, onOpen: openChat) {
                         withAnimation { editMode = .active }
                     }
@@ -483,17 +513,6 @@ struct ConversationsView: View {
             .refreshable { await model.load(settings: settings) }
             .environment(\.editMode, $editMode)
         }
-    }
-
-    private var pinnedLabel: some View {
-        Text("Закреплённые")
-            .font(.caption)
-            .foregroundColor(OVK.Palette.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, OVK.Metrics.contentInset)
-            .frame(height: 28)
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(OVK.Palette.card)
     }
 
     /// Общее меню долгого нажатия — закрепить/открепить, в архив/из архива.

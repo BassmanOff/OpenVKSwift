@@ -24,6 +24,8 @@ struct Video: Decodable, Identifiable, Hashable {
     var thumbURL: URL? { imageURL.flatMap(URL.init(string:)) }
     /// Прямой поток для AVPlayer (нативное видео).
     var streamURL: URL? { mp4URL.flatMap(URL.init(string:)) }
+    /// Основной поток VLC: 720p быстрее начинает играть и достаточно для экрана телефона.
+    var playbackURL: URL? { (mp4ModerateURL ?? mp4URL).flatMap(URL.init(string:)) }
     /// Источник для конвейера подготовки (умеренное качество, полная загрузка).
     var pipelineURL: URL? { (mp4ModerateURL ?? mp4URL).flatMap(URL.init(string:)) }
     /// Ссылка для веб-плеера (внешнее видео).
@@ -33,6 +35,8 @@ struct Video: Decodable, Identifiable, Hashable {
         guard let w = width, let h = height, w > 0, h > 0 else { return nil }
         return CGFloat(w) / CGFloat(h)
     }
+
+    var startsLandscape: Bool { (aspectRatio ?? 0) > 1 }
 
     var durationText: String {
         let m = duration / 60

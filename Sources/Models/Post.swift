@@ -20,6 +20,8 @@ struct Post: Decodable, Identifiable, Hashable {
     let platform: User.OnlinePlatform
     /// Пересланная запись (copy_history) — оригинал репоста с его текстом/вложениями.
     let repost: Repost?
+    /// Геометка записи, если она была передана при wall.post.
+    let geo: Geo?
     /// Может ли текущий пользователь удалить запись.
     let canDelete: Bool
     /// Может ли текущий пользователь редактировать запись (свои посты — 7 дней, посты
@@ -43,6 +45,46 @@ struct Post: Decodable, Identifiable, Hashable {
         let photos: [Photo]
         let audios: [Audio]
         let videos: [Video]
+        let geo: Geo?
+
+        fileprivate init(_ post: Post) {
+            if let original = post.repost {
+                self = original
+            } else {
+                ownerID = post.ownerID
+                postID = post.postID
+                fromID = post.fromID
+                date = post.date
+                text = post.text
+                photos = post.photos
+                audios = post.audios
+                videos = post.videos
+                geo = post.geo
+            }
+        }
+    }
+
+    struct Geo: Decodable, Hashable {
+        let latitude: Double
+        let longitude: Double
+        let name: String
+
+        private enum CodingKeys: String, CodingKey { case coordinates, name }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let coordinates = try c.decode(String.self, forKey: .coordinates)
+                .split(separator: ",")
+                .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard coordinates.count == 2 else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .coordinates, in: c, debugDescription: "Expected latitude,longitude"
+                )
+            }
+            latitude = coordinates[0]
+            longitude = coordinates[1]
+            name = ((try? c.decode(String.self, forKey: .name)) ?? "Место").decodingHTMLEntities
+        }
     }
 
     // MARK: - Decoding
@@ -54,6 +96,7 @@ struct Post: Decodable, Identifiable, Hashable {
         case date, text, attachments, likes, comments, reposts
         case postSource = "post_source"
         case copyHistory = "copy_history"
+        case geo
         case canDelete = "can_delete"
         case canEdit = "can_edit"
     }
@@ -129,18 +172,58 @@ struct Post: Decodable, Identifiable, Hashable {
             }
         }
         platform = plat
+        geo = try? c.decode(Geo.self, forKey: .geo)
 
         let history = (try? c.decode([Post].self, forKey: .copyHistory)) ?? []
         if let first = history.first {
-            repost = Repost(ownerID: first.ownerID, postID: first.postID,
-                            fromID: first.fromID, date: first.date, text: first.text,
-                            photos: first.photos, audios: first.audios, videos: first.videos)
+            repost = Repost(first)
         } else {
             repost = nil
         }
 
-        canDelete = ((try? c.decode(Int.self, forKey: .canDelete)) ?? 0) == 1
-        canEdit = ((try? c.decode(Int.self, forKey: .canEdit)) ?? 0) == 1
+        canDelete = (try? c.decode(Bool.self, forKey: .canDelete))
+            ?? (((try? c.decode(Int.self, forKey: .canDelete)) ?? 0) == 1)
+        canEdit = (try? c.decode(Bool.self, forKey: .canEdit))
+            ?? (((try? c.decode(Int.self, forKey: .canEdit)) ?? 0) == 1)
+    }
+}
+
+enum PostDateText {
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "d MMM 'в' HH:mm"
+        return formatter
+    }()
+
+    private static let dateWithYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "d MMM yyyy 'в' HH:mm"
+        return formatter
+    }()
+
+    static func string(_ timestamp: Int, now: Date = Date()) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+        let calendar = Calendar.current
+        let time = timeFormatter.string(from: date)
+        if calendar.isDate(date, inSameDayAs: now) {
+            return "сегодня в \(time)"
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return "вчера в \(time)"
+        }
+        let formatter = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+            ? dateFormatter : dateWithYearFormatter
+        return formatter.string(from: date).replacingOccurrences(of: ".", with: "")
     }
 }
 

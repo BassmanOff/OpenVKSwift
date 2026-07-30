@@ -3,6 +3,7 @@ import SwiftUI
 struct VKPlayerNowPlayingPage: View {
     /// Плеер теперь оверлей, а не модалка — \.dismiss не закроет его. Просим закрытие у контейнера.
     let clock: PlaybackClock
+    @ObservedObject var interactionGate: PlayerInteractionGate
     var onRequestClose: () -> Void
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: AudioDownloadManager
@@ -46,6 +47,7 @@ struct VKPlayerNowPlayingPage: View {
                 extraCover = await CoverArtService.shared.cover(artist: track.artist, title: track.title)
             }
         }
+        .disabled(interactionGate.isLocked)
     }
 
     @ViewBuilder

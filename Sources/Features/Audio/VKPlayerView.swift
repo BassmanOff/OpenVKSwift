@@ -1,5 +1,33 @@
 import SwiftUI
 
+@MainActor
+final class PlayerInteractionGate: ObservableObject {
+    @Published private(set) var isLocked = false
+    private var pendingUnlock: DispatchWorkItem?
+
+    func lock() {
+        pendingUnlock?.cancel()
+        pendingUnlock = nil
+        isLocked = true
+    }
+
+    func unlock(after delay: TimeInterval = 0.05) {
+        pendingUnlock?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.isLocked = false
+            self?.pendingUnlock = nil
+        }
+        pendingUnlock = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func reset() {
+        pendingUnlock?.cancel()
+        pendingUnlock = nil
+        isLocked = false
+    }
+}
+
 /// Параллельный экран плеера: текст ← сейчас играет → очередь.
 ///
 /// Показывается НЕ модалкой (fullScreenCover убирает экран под собой — размывать нечего,
@@ -23,6 +51,7 @@ struct VKPlayerView: View {
     /// которые тикают только при открытом экране, чтобы скрытые lyrics/slider не
     /// перерисовывались поверх прокрутки ленты.
     @StateObject private var visibleClock = PlaybackClock()
+    @StateObject private var interactionGate = PlayerInteractionGate()
     /// id трека, для которого текст уже загружен/грузится (дедуп повторных вызовов reloadLyrics).
     @State private var loadedLyricsID: String?
     @State private var lyricsTask: Task<Void, Never>?
@@ -48,8 +77,6 @@ struct VKPlayerView: View {
             // Плеер смонтирован постоянно (см. MainTabView) — открытие лишь анимирует offset,
             // ничего не строя заново, поэтому без лага первого показа.
             .offset(y: isPresented ? dragOffset : hiddenOffset)
-            // Во время закрытия экран уже «отпущен» — новые тапы по кнопкам не должны срабатывать.
-            .allowsHitTesting(isPresented && !isClosing)
             // Закрытие — UIKit-пан, НЕ SwiftUI DragGesture: SwiftUI-жест конфликтовал с
             // UIKit-распознавателями пейджера/слайдеров (терялся onEnded → экран «застревал»
             // на полпути, медленные горизонтальные свайпы не листали страницы, свайп поверх
@@ -62,6 +89,7 @@ struct VKPlayerView: View {
                 isEnabled: isPresented,
                 onChanged: { offset in
                     guard !isClosing else { return }
+                    interactionGate.lock()
                     dragOffset = offset
                 },
                 onEnded: { translation, velocity in
@@ -71,11 +99,13 @@ struct VKPlayerView: View {
                         close(velocity: velocity)
                     } else {
                         springBack()
+                        interactionGate.unlock(after: 0.35)
                     }
                 },
                 onCancelled: {
                     guard !isClosing else { return }
                     springBack()
+                    interactionGate.unlock(after: 0.35)
                 }
             ).frame(width: 0, height: 0))
             .onChange(of: isPresented) { shown in
@@ -110,6 +140,10 @@ struct VKPlayerView: View {
                 if isPresented { visibleClock.duration = duration }
             }
             .toast($library.toast)
+            // Последний modifier намеренно: toast и gesture-background создают внешние
+            // overlay-обёртки. Если отключить hit-testing раньше, одна из них остаётся
+            // поверх мини-плеера и поглощает все его кнопки, пока полный плеер скрыт.
+            .allowsHitTesting(isPresented && !isClosing)
     }
 
     /// Подгружает текст текущего трека в lyricsStore (дедуп по id, отмена предыдущей загрузки).
@@ -152,9 +186,20 @@ struct VKPlayerView: View {
             // прокидывать .environmentObject каждой странице явно.
             PlayerPager(
                 selection: $page,
+                onInteractionChanged: { active in
+                    if active {
+                        interactionGate.lock()
+                    } else {
+                        interactionGate.unlock()
+                    }
+                },
                 lyrics: VKPlayerLyricsPage(clock: visibleClock, store: lyricsStore)
                     .environmentObject(player),
-                nowPlaying: VKPlayerNowPlayingPage(clock: visibleClock, onRequestClose: { close() })
+                nowPlaying: VKPlayerNowPlayingPage(
+                    clock: visibleClock,
+                    interactionGate: interactionGate,
+                    onRequestClose: { close() }
+                )
                     .environmentObject(player)
                     .environmentObject(downloads)
                     .environmentObject(settings)
@@ -180,6 +225,7 @@ struct VKPlayerView: View {
                     .foregroundColor(OVK.Palette.textSecondary)
                     .frame(width: 72, height: 44)
             }
+            .disabled(interactionGate.isLocked)
             Spacer()
         }
         .padding(.top, 8)
@@ -208,6 +254,7 @@ struct VKPlayerView: View {
             // (= высота экрана после close) следующее открытие анимировалось бы лишь
             // на последние ~60pt и «доскакивало» мгновенно.
             dragOffset = 0
+            interactionGate.reset()
             isClosing = false
         }
     }
@@ -237,6 +284,7 @@ struct VKPlayerView: View {
             }
         }
         .font(.title3)
+        .disabled(interactionGate.isLocked)
         .padding(.horizontal, 30)
         .padding(.vertical, 18)
     }
@@ -248,10 +296,13 @@ struct VKPlayerView: View {
 /// в _UIQueuingScrollView._replaceViews. Здесь свайп меняет только contentOffset.
 private struct PlayerPager: UIViewControllerRepresentable {
     @Binding var selection: Int
+    let onInteractionChanged: (Bool) -> Void
     private let pages: [AnyView]
 
-    init(selection: Binding<Int>, lyrics: some View, nowPlaying: some View, queue: some View) {
+    init(selection: Binding<Int>, onInteractionChanged: @escaping (Bool) -> Void,
+         lyrics: some View, nowPlaying: some View, queue: some View) {
         _selection = selection
+        self.onInteractionChanged = onInteractionChanged
         pages = [AnyView(lyrics), AnyView(nowPlaying), AnyView(queue)]
     }
 
@@ -265,6 +316,9 @@ private struct PlayerPager: UIViewControllerRepresentable {
         let pager = FixedPagerController(pages: controllers, selection: start)
         pager.onSelectionChanged = { [weak coordinator = context.coordinator] index in
             coordinator?.select(index)
+        }
+        pager.onInteractionChanged = { [weak coordinator = context.coordinator] active in
+            coordinator?.interactionChanged(active)
         }
         return pager
     }
@@ -283,6 +337,10 @@ private struct PlayerPager: UIViewControllerRepresentable {
             guard parent.selection != index else { return }
             parent.selection = index
         }
+
+        func interactionChanged(_ active: Bool) {
+            parent.onInteractionChanged(active)
+        }
     }
 }
 
@@ -295,6 +353,7 @@ private final class FixedPagerController: UIViewController, UIScrollViewDelegate
     private var lastLaidOutSize: CGSize = .zero
     private var programmaticTarget: Int?
     var onSelectionChanged: ((Int) -> Void)?
+    var onInteractionChanged: ((Bool) -> Void)?
 
     init(pages: [UIViewController], selection: Int) {
         pageControllers = pages
@@ -367,14 +426,19 @@ private final class FixedPagerController: UIViewController, UIScrollViewDelegate
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         programmaticTarget = nil
+        onInteractionChanged?(true)
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         finishPaging()
+        onInteractionChanged?(false)
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate { finishPaging() }
+        if !decelerate {
+            finishPaging()
+            onInteractionChanged?(false)
+        }
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -425,8 +489,8 @@ private final class FixedPagerController: UIViewController, UIScrollViewDelegate
 /// (cancelsTouchesInView), поэтому слайдер не дёргается. Терминальное состояние
 /// (.ended/.cancelled) UIKit доставляет всегда — «застрять» закрытие не может.
 private struct DismissPanGesture: UIViewRepresentable {
-    /// Плеер смонтирован постоянно — пока он закрыт, распознаватель на корне ДОЛЖЕН быть
-    /// выключен, иначе перехватывал бы вертикальные свайпы по всему приложению.
+    /// Плеер смонтирован постоянно, но распознаватель существует на UIWindow только пока
+    /// экран открыт; в закрытом состоянии он полностью снимается с окна.
     var isEnabled: Bool
     var onChanged: (CGFloat) -> Void
     var onEnded: (_ translation: CGFloat, _ velocity: CGFloat) -> Void
@@ -473,8 +537,10 @@ private struct DismissPanGesture: UIViewRepresentable {
         init(_ parent: DismissPanGesture) { self.parent = parent }
 
         func install(on window: UIWindow?) {
-            guard let window else {
-                if let pan { pan.view?.removeGestureRecognizer(pan) }
+            // Этот recognizer живёт на UIWindow вне SwiftUI hit-test дерева. Когда плеер
+            // закрыт, полностью снимаем его с окна, чтобы не оставлять глобальный gesture state.
+            guard parent.isEnabled, let window else {
+                uninstall()
                 return
             }
 
@@ -484,14 +550,14 @@ private struct DismissPanGesture: UIViewRepresentable {
             } else {
                 recognizer = UIPanGestureRecognizer(target: self, action: #selector(handle(_:)))
                 recognizer.delegate = self
+                recognizer.cancelsTouchesInView = true
+                recognizer.delaysTouchesBegan = false
+                recognizer.delaysTouchesEnded = false
                 pan = recognizer
             }
             if recognizer.view !== window {
                 recognizer.view?.removeGestureRecognizer(recognizer)
                 window.addGestureRecognizer(recognizer)
-            }
-            if recognizer.isEnabled != parent.isEnabled {
-                recognizer.isEnabled = parent.isEnabled
             }
 #if DEBUG
             assert(recognizer.view === window)
@@ -508,7 +574,7 @@ private struct DismissPanGesture: UIViewRepresentable {
         @objc func handle(_ pan: UIPanGestureRecognizer) {
             let translation = pan.translation(in: pan.view).y
             switch pan.state {
-            case .changed:
+            case .began, .changed:
                 parent.onChanged(max(translation, 0))
             case .ended:
                 parent.onEnded(translation, pan.velocity(in: pan.view).y)

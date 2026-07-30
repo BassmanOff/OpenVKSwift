@@ -12,6 +12,8 @@ struct Community: Decodable, Identifiable, Hashable {
     let photoMax: String?
     /// Является ли текущий пользователь администратором сообщества.
     let isAdmin: Bool
+    /// Разрешает ли сообщество текущему пользователю публиковать на стене.
+    let canPost: Bool
     let isMember: Bool
     let description: String?
     let membersCount: Int?
@@ -36,6 +38,7 @@ struct Community: Decodable, Identifiable, Hashable {
         case photo200 = "photo_200"
         case photoMax = "photo_max"
         case isAdmin = "is_admin"
+        case canPost = "can_post"
         case isMember = "is_member"
         case description
         case membersCount = "members_count"
@@ -50,8 +53,12 @@ struct Community: Decodable, Identifiable, Hashable {
         photo100     = try? c.decode(String.self, forKey: .photo100)
         photo200     = try? c.decode(String.self, forKey: .photo200)
         photoMax     = try? c.decode(String.self, forKey: .photoMax)
-        isAdmin      = ((try? c.decode(Int.self, forKey: .isAdmin)) ?? 0) == 1
-        isMember     = ((try? c.decode(Int.self, forKey: .isMember)) ?? 0) == 1
+        isAdmin      = (try? c.decode(Bool.self, forKey: .isAdmin))
+            ?? (((try? c.decode(Int.self, forKey: .isAdmin)) ?? 0) == 1)
+        canPost       = (try? c.decode(Bool.self, forKey: .canPost))
+            ?? (((try? c.decode(Int.self, forKey: .canPost)) ?? 0) == 1)
+        isMember     = (try? c.decode(Bool.self, forKey: .isMember))
+            ?? (((try? c.decode(Int.self, forKey: .isMember)) ?? 0) == 1)
         description  = try? c.decode(String.self, forKey: .description)
         membersCount = try? c.decode(Int.self, forKey: .membersCount)
     }

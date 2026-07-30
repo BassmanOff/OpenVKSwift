@@ -138,3 +138,10 @@ struct NotificationsResponse: Decodable {
         case lastViewed = "last_viewed"
     }
 }
+
+enum ActivityCompatibility {
+    static func friendRequests(_ users: [User], currentUserID: Int?) -> [User] {
+        guard let currentUserID else { return users }
+        return users.filter { $0.id != currentUserID }
+    }
+}

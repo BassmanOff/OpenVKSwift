@@ -1,12 +1,25 @@
 import SwiftUI
 import UIKit
 
-/// Шторка «Поделиться записью»: на свою стену / стену сообщества (если админ),
-/// ссылкой другу или себе в ЛС, либо через системный шаринг (иконка в углу).
+/// Шторка «Поделиться»: запись можно репостнуть на стену / стену сообщества,
+/// а запись или профиль — отправить ссылкой другу либо себе в ЛС.
 struct RepostSheet: View {
-    let post: Post
+    let post: Post?
+    private let profileURL: URL?
     /// (сообщение для тоста, увеличить ли счётчик репостов на карточке).
     var onDone: (String, Bool) -> Void
+
+    init(post: Post, onDone: @escaping (String, Bool) -> Void) {
+        self.post = post
+        profileURL = nil
+        self.onDone = onDone
+    }
+
+    init(profileURL: URL, onDone: @escaping (String, Bool) -> Void) {
+        post = nil
+        self.profileURL = profileURL
+        self.onDone = onDone
+    }
 
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
@@ -22,8 +35,12 @@ struct RepostSheet: View {
     @State private var infoToast: String?
 
     private var shareURL: URL {
-        URL(string: "\(settings.instance.webURL.absoluteString)/wall\(post.ownerID)_\(post.postID)") ?? settings.instance.webURL
+        if let profileURL { return profileURL }
+        guard let post else { return settings.instance.webURL }
+        return URL(string: "\(settings.instance.webURL.absoluteString)/wall\(post.ownerID)_\(post.postID)") ?? settings.instance.webURL
     }
+
+    private var isPostShare: Bool { post != nil }
 
     private var recentConversations: [Conversation] {
         guard searchText.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
@@ -47,6 +64,8 @@ struct RepostSheet: View {
             // не делает. Заодно нет и верхнего отступа insetGrouped-стиля List.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    OVKSearchStrip(text: $searchText, prompt: "Поиск друзей")
+
                     if searchText.trimmingCharacters(in: .whitespaces).isEmpty, let uid = settings.userID {
                         favoriteRow(id: uid)
                         Divider().padding(.leading, 16)
@@ -63,16 +82,17 @@ struct RepostSheet: View {
                     }
                 }
             }
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск друзей")
-            .navigationTitle("Поделиться записью")
+            .navigationTitle(isPostShare ? "Поделиться записью" : "Поделиться профилем")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Отмена") { dismiss() }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { showShareSheet = true } label: {
-                        Image(systemName: "square.and.arrow.up")
+                    if isPostShare {
+                        Button { showShareSheet = true } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
                     }
                 }
             }
@@ -111,7 +131,7 @@ struct RepostSheet: View {
     private func favoriteRow(id: Int) -> some View {
         selectableRow(id: id, name: "Избранное") {
             ZStack {
-                Circle().fill(OVK.Palette.link)
+                Circle().fill(OVK.Palette.primary)
                 Image(systemName: "bookmark.fill").foregroundColor(.white).font(.system(size: 14))
             }
             .frame(width: 36, height: 36)
@@ -131,7 +151,7 @@ struct RepostSheet: View {
                     .lineLimit(1)
                 Spacer()
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundColor(isSelected ? OVK.Palette.link : OVK.Palette.separator)
+                    .foregroundColor(isSelected ? OVK.Palette.primary : OVK.Palette.separator)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -155,22 +175,24 @@ struct RepostSheet: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 11)
-                        .background(OVK.Palette.link)
+                        .background(OVK.Palette.primary)
                         .cornerRadius(10)
                 }
                 .padding(.horizontal)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    pill(icon: "arrowshape.turn.up.right", label: "На своей странице") {
-                        Task { await repost(groupID: nil) }
-                    }
-                    if !groupsVM.adminGroups.isEmpty {
-                        pill(icon: "person.3", label: "На стене сообщества") {
-                            if groupsVM.adminGroups.count == 1 {
-                                Task { await repost(groupID: groupsVM.adminGroups[0].groupID) }
-                            } else {
-                                showGroupPicker = true
+                    if isPostShare {
+                        pill(icon: "arrowshape.turn.up.right", label: "На своей странице") {
+                            Task { await repost(groupID: nil) }
+                        }
+                        if !groupsVM.adminGroups.isEmpty {
+                            pill(icon: "person.3", label: "На стене сообщества") {
+                                if groupsVM.adminGroups.count == 1 {
+                                    Task { await repost(groupID: groupsVM.adminGroups[0].groupID) }
+                                } else {
+                                    showGroupPicker = true
+                                }
                             }
                         }
                     }
@@ -209,8 +231,12 @@ struct RepostSheet: View {
     private func loadAll() async {
         async let friendsTask: Void = friendsVM.load(settings: settings)
         async let conversationsTask: Void = conversationsVM.load(settings: settings)
-        async let groupsTask: Void = loadGroupsIfPossible()
-        _ = await (friendsTask, conversationsTask, groupsTask)
+        if isPostShare {
+            async let groupsTask: Void = loadGroupsIfPossible()
+            _ = await (friendsTask, conversationsTask, groupsTask)
+        } else {
+            _ = await (friendsTask, conversationsTask)
+        }
     }
 
     private func loadGroupsIfPossible() async {
@@ -219,7 +245,7 @@ struct RepostSheet: View {
     }
 
     private func repost(groupID: Int?) async {
-        guard !isBusy else { return }
+        guard let post, !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
         guard await repostVM.repostToWall(post: post, groupID: groupID, settings: settings) else { return }
@@ -233,7 +259,7 @@ struct RepostSheet: View {
         defer { isBusy = false }
         var sent = 0
         for peerID in selectedPeerIDs {
-            if await repostVM.sendLink(post: post, peerID: peerID, settings: settings) { sent += 1 }
+            if await repostVM.sendLink(shareURL.absoluteString, peerID: peerID, settings: settings) { sent += 1 }
         }
         guard sent > 0 else { return }
         onDone("Отправлено: \(sent)", false)

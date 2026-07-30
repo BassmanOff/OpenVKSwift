@@ -32,6 +32,36 @@ final class PhotosViewModel: ObservableObject {
     }
 }
 
+/// Лёгкая выборка для шапки профиля: сначала пять фото для первого кадра, затем
+/// ещё пятнадцать. Полная библиотека остаётся ответственностью PhotosView.
+@MainActor
+final class ProfilePhotosPreviewModel: ObservableObject {
+    @Published private(set) var photos: [Photo] = []
+    @Published private(set) var totalCount = 0
+    private var loadedOwnerID: Int?
+
+    func loadIfNeeded(ownerID: Int, settings: AppSettings) async {
+        guard loadedOwnerID != ownerID, let token = settings.token else { return }
+        loadedOwnerID = ownerID
+        let client = OVKClient(instance: settings.instance, token: token, apiVersion: settings.apiVersion)
+        do {
+            let first: ItemsResponse<Photo> = try await client.call(
+                "photos.getAll", params: ["owner_id": String(ownerID), "photo_sizes": "1", "count": "5"]
+            )
+            totalCount = first.count
+            photos = first.items
+            guard first.count > first.items.count else { return }
+            let rest: ItemsResponse<Photo> = try await client.call(
+                "photos.getAll", params: ["owner_id": String(ownerID), "photo_sizes": "1", "offset": "5", "count": "15"]
+            )
+            let existing = Set(photos.map(\.id))
+            photos += rest.items.filter { !existing.contains($0.id) }
+        } catch {
+            // Фотоблок вторичен: профиль остаётся полезным, даже если он недоступен.
+        }
+    }
+}
+
 struct PhotosView: View {
     let ownerID: Int
     @EnvironmentObject private var settings: AppSettings

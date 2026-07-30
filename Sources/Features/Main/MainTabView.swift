@@ -34,13 +34,13 @@ struct MainTabView: View {
     @StateObject private var friendsTab = FriendsTabViewModel()
 
     var body: some View {
-        // safeAreaInset оставляет последний ряд доступным, но фон списка продолжает жить
-        // под полупрозрачным нижним хромом. Вложенные нижние панели разделов получают
-        // уменьшенную safe area и не перекрываются мини-плеером/таб-баром.
-        content
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                bottomRegion
-            }
+        // Контент и нижний хром занимают разные реальные области layout. safeAreaInset
+        // лишь менял safe area вложенных NavigationView, но не обрезал их собственный frame:
+        // из-за этого край некоторых страниц оставался виден под меню и мини-плеером.
+        VStack(spacing: 0) {
+            content
+            bottomRegion
+        }
         // Новый плеер — ОВЕРЛЕЙ в той же иерархии (не модалка): BlurBackdrop внутри размывает
         // эти же вкладки, а свайп-вниз открывает их из-под плеера. Смонтирован ПОСТОЯННО и
         // уезжает за нижний край offset'ом — построение иерархии (блюр, три страницы,
@@ -49,6 +49,9 @@ struct MainTabView: View {
             if settings.useNewPlayer {
                 VKPlayerView(isPresented: $showPlayer)
                     .zIndex(10)
+                    // Финальная граница hit-testing находится у владельца overlay:
+                    // скрытый постоянно смонтированный плеер не участвует в касаниях.
+                    .allowsHitTesting(showPlayer)
             }
         }
         // ГЛОБАЛЬНЫЙ перехват ссылок OpenVK: override навешен НАД всеми вкладками → наследуется

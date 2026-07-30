@@ -23,6 +23,12 @@ enum OVK {
         static let miniPlayerHeight: CGFloat = 52
         static let tabBarHeight: CGFloat = 49
     }
+
+    /// Базовый шрифт сохраняет пропорции старого клиента, но масштабируется вместе
+    /// с Dynamic Type. Явные акценты экранов по-прежнему могут задавать свой стиль.
+    enum Typography {
+        static let body = Font.custom("HelveticaNeue", size: 17, relativeTo: .body)
+    }
 }
 
 extension Color {
