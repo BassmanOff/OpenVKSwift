@@ -9,6 +9,8 @@ struct NewPostView: View {
     var groupName: String? = nil
     /// Редактируемая запись. nil = обычное создание новой записи (wall.post).
     var editingPost: Post? = nil
+    private let initialImages: [UIImage]
+    private let initialLocation: PostLocationDraft?
 
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var drafts: PostDraftManager
@@ -30,10 +32,14 @@ struct NewPostView: View {
     @State private var postAsGroup: Bool
     @State private var signed = false
 
-    init(ownerID: Int, groupName: String? = nil, editingPost: Post? = nil, onPosted: @escaping () -> Void) {
+    init(ownerID: Int, groupName: String? = nil, editingPost: Post? = nil,
+         initialImages: [UIImage] = [], initialLocation: PostLocationDraft? = nil,
+         onPosted: @escaping () -> Void) {
         self.ownerID = ownerID
         self.groupName = groupName
         self.editingPost = editingPost
+        self.initialImages = initialImages
+        self.initialLocation = initialLocation
         self.onPosted = onPosted
         // При редактировании — признак «от имени сообщества» берём из самой записи
         // (fromID сообщества, а не пользователя), а не из groupName (при правке чужого поста
@@ -46,12 +52,19 @@ struct NewPostView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let groupName { identityBar(groupName) }
                 textEditor
-                if !model.existingPhotos.isEmpty || !model.images.isEmpty { attachments }
-                if !model.audioTracks.isEmpty { audioAttachments }
-                if !model.videos.isEmpty { videoAttachments }
-                if !model.docs.isEmpty { docAttachments }
-                if let poll = model.existingPoll { existingPollAttachment(poll) }
-                else if let draft = model.pollDraft { pollAttachment(draft) }
+                Group {
+                    if let location = model.location {
+                        locationAttachment(name: location.name, removable: true)
+                    } else if let geo = model.existingGeo {
+                        locationAttachment(name: geo.name, removable: false)
+                    }
+                    if !model.existingPhotos.isEmpty || !model.images.isEmpty { attachments }
+                    if !model.audioTracks.isEmpty { audioAttachments }
+                    if !model.videos.isEmpty { videoAttachments }
+                    if !model.docs.isEmpty { docAttachments }
+                    if let poll = model.existingPoll { existingPollAttachment(poll) }
+                    else if let draft = model.pollDraft { pollAttachment(draft) }
+                }
                 addBar
                 if let error = model.errorMessage {
                     Text(error).font(.footnote).foregroundColor(.red).padding(.horizontal)
@@ -66,11 +79,20 @@ struct NewPostView: View {
                 guard !didRestore else { return }
                 if let editingPost {
                     model.loadForEdit(editingPost)
-                } else if let d = drafts.draft, d.ownerID == ownerID {
-                    // Черновик этой же стены — продолжаем с места закрытия.
-                    model.restore(from: d)
-                    postAsGroup = d.postAsGroup
-                    signed = d.signed
+                } else {
+                    if let d = drafts.draft, d.ownerID == ownerID {
+                        // Черновик этой же стены — продолжаем с места закрытия.
+                        model.restore(from: d)
+                        postAsGroup = d.postAsGroup
+                        signed = d.signed
+                    }
+                    for image in initialImages { model.addImage(image) }
+                    if let initialLocation {
+                        model.location = initialLocation
+                        if model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            model.text = initialLocation.name
+                        }
+                    }
                 }
             }
             .onDisappear {
@@ -176,6 +198,27 @@ struct NewPostView: View {
                     .padding(.trailing, 16)
             }
         }
+    }
+
+    private func locationAttachment(name: String, removable: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "mappin.and.ellipse")
+                .foregroundColor(OVK.Palette.primary)
+            Text(name)
+                .font(.subheadline)
+                .foregroundColor(OVK.Palette.link)
+                .lineLimit(2)
+            Spacer()
+            if removable {
+                Button { model.location = nil } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(OVK.Palette.textSecondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
     }
 
     private var attachments: some View {

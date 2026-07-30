@@ -127,7 +127,11 @@ final class LongPollService: ObservableObject {
                 let scheme = settings.instance.apiURL.scheme ?? "https"
                 serverString = "\(scheme)://\(serverString)"
             }
-            guard var comp = URLComponents(string: serverString) else {
+            guard let serverURL = URL(string: serverString),
+                  var comp = URLComponents(
+                    url: settings.instance.routedServiceURL(serverURL),
+                    resolvingAgainstBaseURL: false
+                  ) else {
                 server = nil
                 continue
             }
@@ -155,6 +159,10 @@ final class LongPollService: ObservableObject {
                 request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
                 let (data, urlResponse) = try await session.data(for: request)
                 if Task.isCancelled { break }
+                if let http = urlResponse as? HTTPURLResponse,
+                   !(200...299).contains(http.statusCode) {
+                    throw OVKError.http(http.statusCode)
+                }
                 failureStreak = 0
                 lastCycleAt = Date()
                 let waited = Int(Date().timeIntervalSince(started))

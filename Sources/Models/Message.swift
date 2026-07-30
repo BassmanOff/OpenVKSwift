@@ -94,6 +94,24 @@ struct Conversation: Codable, Identifiable, Hashable {
         try convo.encode(unreadCount, forKey: .unreadCount)
         try c.encodeIfPresent(lastMessage, forKey: .lastMessage)
     }
+
+    /// A short server page replaces normal dialogs but must not evict locally archived ones.
+    static func merging(
+        fresh: [Conversation],
+        cached: [Conversation],
+        retaining peerIDs: Set<Int>
+    ) -> [Conversation] {
+        let freshIDs = Set(fresh.map(\.peerID))
+        return fresh + cached.filter {
+            peerIDs.contains($0.peerID) && !freshIDs.contains($0.peerID)
+        }
+    }
+}
+
+enum ConversationIdentity {
+    static func title(peerID: Int, currentUserID: Int?, fallback: String) -> String {
+        peerID == currentUserID ? "Избранное" : fallback
+    }
 }
 
 /// Ответ messages.getConversations (extended=1).

@@ -18,16 +18,19 @@ struct DocAttachPicker: View {
 
     var body: some View {
         NavigationView {
-            Group {
-                if showingSearch {
-                    list(searchResults, empty: "Ничего не найдено", loading: isSearching)
-                } else {
-                    list(ownDocs, empty: "Нет файлов", loading: isLoadingOwn)
+            VStack(spacing: 0) {
+                OVKSearchStrip(text: $searchText, prompt: "Поиск файлов")
+                Group {
+                    if showingSearch {
+                        list(searchResults, empty: "Ничего не найдено", loading: isSearching)
+                    } else {
+                        list(ownDocs, empty: "Нет файлов", loading: isLoadingOwn)
+                    }
                 }
             }
+            .background(OVK.Palette.background.ignoresSafeArea())
             .navigationTitle("Прикрепить файл")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Поиск файлов")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Отмена") { dismiss() }
@@ -48,15 +51,14 @@ struct DocAttachPicker: View {
     @ViewBuilder
     private func list(_ docs: [Document], empty: String, loading: Bool) -> some View {
         if loading && docs.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка файлов…", isLoading: true)
         } else if docs.isEmpty {
-            Text(empty)
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: empty)
         } else {
             List(docs) { doc in
                 Button { onPick(doc); dismiss() } label: { row(doc) }
                     .buttonStyle(.plain)
+                    .ovkPlainListRow()
             }
             .listStyle(.plain)
         }

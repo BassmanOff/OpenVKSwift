@@ -5,6 +5,7 @@ struct RootView: View {
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: AudioDownloadManager
     @EnvironmentObject private var library: LibraryManager
+    @EnvironmentObject private var likes: LikesManager
     @EnvironmentObject private var longPoll: LongPollService
     @EnvironmentObject private var drafts: PostDraftManager
 
@@ -12,6 +13,7 @@ struct RootView: View {
         Group {
             if settings.isLoggedIn {
                 MainTabView()
+                    .id(settings.sessionID)
             } else {
                 LoginView()
             }
@@ -28,21 +30,15 @@ struct RootView: View {
         .onChange(of: settings.autoDownloadMyTracks) { enabled in
             player.downloadOnPlay = enabled
         }
-        .onChange(of: settings.isLoggedIn) { loggedIn in
-            // При выходе из аккаунта останавливаем воспроизведение и LongPoll,
-            // и стираем кэши личных сообщений.
-            if !loggedIn {
-                player.stop()
-                longPoll.stop()
-                ConversationsViewModel.clearCache()
-                ChatViewModel.clearAllCaches()
-                // Кэши ленты и профилей — тоже личные данные.
-                NewsfeedViewModel.clearCache()
-                ProfileViewModel.clearCache()
-                WallViewModel.clearCache()
-                ObjectResolver.shared.clear() // посты/фото/видео/сообщества/плейлисты — тоже личные данные
-                drafts.clear() // черновик поста — тоже личные данные
-            }
+        .onChange(of: settings.sessionID) { _ in
+            // Экранные модели пересоздаются через .id(sessionID); дисковые кэши остаются
+            // в изолированном каталоге аккаунта и снова используются при возврате.
+            player.stop()
+            longPoll.stop()
+            likes.clear()
+            LikersViewModel.clearCache()
+            ObjectResolver.shared.clear()
+            drafts.clear()
         }
     }
 }

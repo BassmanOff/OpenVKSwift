@@ -41,13 +41,11 @@ struct VideosView: View {
     var body: some View {
         Group {
             if model.isLoading && model.videos.isEmpty {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                OVKListStateView(message: "Загрузка видеозаписей…", isLoading: true)
             } else if let error = model.errorMessage, model.videos.isEmpty {
                 ErrorRetry(message: error) { Task { await model.load(ownerID: ownerID, settings: settings) } }
             } else if model.videos.isEmpty {
-                Text("Нет видеозаписей")
-                    .foregroundColor(OVK.Palette.textSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                OVKListStateView(message: "Нет видеозаписей")
             } else {
                 List(model.videos) { video in
                     HStack(spacing: 12) {
@@ -84,6 +82,7 @@ struct VideosView: View {
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
                     .onTapGesture { selected = video }
+                    .ovkPlainListRow()
                 }
                 .listStyle(.plain)
                 .refreshable { await model.load(ownerID: ownerID, settings: settings) }

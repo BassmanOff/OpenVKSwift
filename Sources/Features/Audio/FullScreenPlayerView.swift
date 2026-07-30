@@ -165,7 +165,7 @@ struct FullScreenPlayerView: View {
             if downloads.isDownloaded(track) {
                 Label("Скачано", systemImage: "checkmark.circle.fill")
                     .font(.footnote)
-                    .foregroundColor(.green)
+                    .foregroundColor(OVK.Palette.primary)
             } else if downloads.inProgress.contains(track.key) {
                 ProgressView()
             } else if track.isPlayable {

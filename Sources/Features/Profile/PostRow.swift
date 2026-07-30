@@ -24,7 +24,7 @@ struct PostRow: View {
     @State private var fullRepost: Post?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             authorHeader(id: post.fromID, date: post.date, platform: post.platform)
 
             if !post.text.isEmpty {
@@ -33,7 +33,8 @@ struct PostRow: View {
                     .foregroundColor(OVK.Palette.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            photosView(post.photos)
+            if let geo = post.geo { locationRow(geo) }
+            photosView(post.photos, edgeToEdge: true)
             MediaAttachmentsView(audios: post.audios, videos: post.videos)
 
             if let poll = post.poll {
@@ -49,7 +50,8 @@ struct PostRow: View {
 
             footer
         }
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { likes.like(post, settings: settings) }
         .sheet(isPresented: $showCommentsSheet) {
@@ -80,7 +82,16 @@ struct PostRow: View {
     private func openAuthor(_ id: Int) {
         guard id != 0 else { return }
         let path = id > 0 ? "id\(id)" : "club\(-id)"
-        if let url = URL(string: "https://openvk.org/\(path)") { openURL(url) }
+        openURL(settings.instance.webURL.appendingPathComponent(path))
+    }
+
+    private func openLocation(_ geo: Post.Geo) {
+        var components = URLComponents(string: "http://maps.apple.com/")
+        components?.queryItems = [
+            URLQueryItem(name: "ll", value: "\(geo.latitude),\(geo.longitude)"),
+            URLQueryItem(name: "q", value: geo.name)
+        ]
+        if let url = components?.url { openURL(url) }
     }
 
     /// Если у репоста нет видео/аудио — возможно, их срезал API (copy_history содержит
@@ -107,15 +118,15 @@ struct PostRow: View {
                     }
                     .frame(width: 40, height: 40)
                     .clipped()
-                    .cornerRadius(4)
+                    .cornerRadius(settings.legacyAvatarIndicators ? 4 : 20)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(author?.name ?? "Пользователь")
-                            .font(.subheadline).fontWeight(.semibold)
+                            .font(.system(size: 15, weight: .medium))
                             .foregroundColor(OVK.Palette.link)
                             .lineLimit(1)
                         HStack(spacing: 4) {
-                            Text(Self.dateText(date))
+                            Text(PostDateText.string(date))
                                 .font(.caption)
                                 .foregroundColor(OVK.Palette.textSecondary)
                             if platform.hasIcon {
@@ -157,7 +168,7 @@ struct PostRow: View {
     // MARK: - Вложения
 
     @ViewBuilder
-    private func photosView(_ photos: [Photo]) -> some View {
+    private func photosView(_ photos: [Photo], edgeToEdge: Bool = false) -> some View {
         if photos.count == 1, let photo = photos.first {
             // Одно фото — показываем целиком в его пропорциях (без кадрирования).
             // .clipped() НЕ ограничивает хит-тест: невидимый «хвост» фото перехватывал бы
@@ -170,7 +181,8 @@ struct PostRow: View {
                 .aspectRatio(photo.aspectRatio ?? 1.4, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
-                .cornerRadius(6)
+                .cornerRadius(edgeToEdge ? 0 : OVK.Metrics.compactCornerRadius)
+                .padding(.horizontal, edgeToEdge ? -12 : 0)
                 .allowsHitTesting(false)
                 .photoHeroSource(photos: photos, index: 0, post: post, coordinator: photoHero)
         } else if !photos.isEmpty {
@@ -188,11 +200,26 @@ struct PostRow: View {
                                 .allowsHitTesting(false)
                         )
                         .clipped()
-                        .cornerRadius(4)
+                        .cornerRadius(OVK.Metrics.compactCornerRadius)
                         .photoHeroSource(photos: photos, index: i, post: post, coordinator: photoHero)
                 }
             }
         }
+    }
+
+    private func locationRow(_ geo: Post.Geo) -> some View {
+        Button { openLocation(geo) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "mappin.and.ellipse")
+                Text(geo.name)
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            .font(.subheadline)
+            .foregroundColor(OVK.Palette.link)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Репост
@@ -200,8 +227,8 @@ struct PostRow: View {
     private func repostBlock(_ repost: Post.Repost) -> some View {
         HStack(spacing: 0) {
             Rectangle()
-                .fill(OVK.Palette.separator)
-                .frame(width: 3)
+                .fill(OVK.Palette.primary)
+                .frame(width: 2)
             VStack(alignment: .leading, spacing: 6) {
                 Button { openAuthor(repost.fromID) } label: {
                     HStack(spacing: 8) {
@@ -210,7 +237,7 @@ struct PostRow: View {
                         }
                         .frame(width: 28, height: 28)
                         .clipped()
-                        .cornerRadius(3)
+                        .cornerRadius(settings.legacyAvatarIndicators ? 4 : 14)
                         Text(authors[repost.fromID]?.name ?? "Запись")
                             .font(.caption).fontWeight(.semibold)
                             .foregroundColor(OVK.Palette.link)
@@ -225,6 +252,7 @@ struct PostRow: View {
                         .foregroundColor(OVK.Palette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let geo = fullRepost?.geo ?? repost.geo { locationRow(geo) }
                 // Вложения: приоритет — дозагруженный оригинал (в copy_history видео/аудио нет).
                 photosView(fullRepost?.photos ?? repost.photos)
                 MediaAttachmentsView(
@@ -246,7 +274,7 @@ struct PostRow: View {
             // Не Button + .simultaneousGesture (оба срабатывали разом: лайк И список)
             // и не LongPress.exclusively(before: Tap) (тап-лайк проглатывался).
             Label("\(likes.count(post))", systemImage: likes.isLiked(post) ? "heart.fill" : "heart")
-                .foregroundColor(likes.isLiked(post) ? .red : OVK.Palette.textSecondary)
+                .foregroundColor(likes.isLiked(post) ? OVK.Palette.primary : OVK.Palette.textSecondary)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     likes.toggle(post, settings: settings)
@@ -272,18 +300,8 @@ struct PostRow: View {
             .buttonStyle(.plain)
             Spacer()
         }
-        .font(.system(size: 15)) // как в PhotoHero (pointSize 16 иконка / 15pt текст)
+        .font(.system(size: 15, weight: .regular))
         .padding(.top, 2)
     }
 
-    private static let formatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ru_RU")
-        f.dateFormat = "d MMM 'в' HH:mm"
-        return f
-    }()
-
-    private static func dateText(_ timestamp: Int) -> String {
-        formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
-    }
 }

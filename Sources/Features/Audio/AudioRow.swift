@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Строка трека в стиле старого VK: ▶ + название/исполнитель + длительность + кнопка скачать.
+/// Строка трека в стиле старого VK: обложка + название/исполнитель + длительность + одно действие.
 /// Используется в списке музыки, в поиске и на экране альбома.
 struct AudioRow: View {
     let track: Audio
     /// Показывать ли в контекстном меню действие «Добавить к себе / Убрать» (в «Загрузках» не нужно).
     var showAddToLibrary: Bool = true
-    /// Показывать ли зелёную галочку «уже в моей музыке» (полезно в поиске).
+    /// Показывать ли состояние «уже в моей музыке» (полезно в поиске).
     var showAddedBadge: Bool = false
     /// Встроенное контекст-меню SwiftUI. ВЫКЛЮЧАЙТЕ внутри ячейки List с другим контентом
     /// (посты в ленте): там SwiftUI вешает long-press на ВСЮ ячейку, а не на строку трека.
@@ -24,12 +24,6 @@ struct AudioRow: View {
     /// Скачанный трек можно играть офлайн, даже если онлайн-url протух.
     private var canPlay: Bool { player.isAvailable(track) }
 
-    private var leadingIcon: String {
-        if canPlay { return (isCurrent && player.isPlaying) ? "pause.circle.fill" : "play.circle.fill" }
-        if track.isProcessing { return "arrow.clockwise.circle" }
-        return "nosign" // withdrawn
-    }
-
     private var subtitle: String {
         if canPlay { return track.artist }
         if track.isProcessing { return "Обрабатывается — нажмите, чтобы повторить" }
@@ -37,37 +31,27 @@ struct AudioRow: View {
     }
 
     private var titleColor: Color {
-        guard canPlay else { return OVK.Palette.textSecondary }
-        return isCurrent ? OVK.Palette.primary : OVK.Palette.textPrimary
+        canPlay ? OVK.Palette.textPrimary : OVK.Palette.textSecondary
     }
 
-    /// Слева — обложка альбома (если есть) с иконкой play/pause поверх, иначе обычная иконка.
+    /// Одинаковая плитка 44 pt есть у каждого трека; заполненный символ появляется
+    /// только у выбранного трека, а недоступность обозначается контурным символом.
     @ViewBuilder
     private var leading: some View {
-        if let cover = coverURL {
-            CachedImage(url: cover) {
-                OVK.Palette.background
-            }
-            .frame(width: 44, height: 44)
-            .clipped()
-            .cornerRadius(6)
+        AlbumCover(url: coverURL, size: 44, corner: OVK.Metrics.compactCornerRadius)
             .overlay {
-                if canPlay {
+                if isCurrent && canPlay {
                     ZStack {
-                        Color.black.opacity(0.25)
-                        Image(systemName: (isCurrent && player.isPlaying) ? "pause.fill" : "play.fill")
-                            .foregroundColor(.white)
-                            .shadow(radius: 2)
+                        if coverURL != nil { Color.black.opacity(0.25) }
+                        Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .foregroundColor(coverURL == nil ? OVK.Palette.primary : .white)
                     }
-                    .cornerRadius(6)
+                    .cornerRadius(OVK.Metrics.compactCornerRadius)
+                } else if !canPlay {
+                    Image(systemName: track.isProcessing ? "arrow.clockwise.circle" : "nosign")
+                        .foregroundColor(OVK.Palette.textSecondary)
                 }
             }
-        } else {
-            Image(systemName: leadingIcon)
-                .font(.title)
-                .foregroundColor(canPlay ? OVK.Palette.primary : OVK.Palette.textSecondary.opacity(0.5))
-                .frame(width: 44, height: 44)
-        }
     }
 
     var body: some View {
@@ -88,23 +72,17 @@ struct AudioRow: View {
                     .lineLimit(1)
                 Text(subtitle)
                     .font(.footnote)
-                    .foregroundColor(OVK.Palette.textSecondary)
+                    .foregroundColor(canPlay ? OVK.Palette.link : OVK.Palette.textSecondary)
                     .lineLimit(1)
             }
 
             Spacer()
 
-            if showAddedBadge && library.isAdded(track) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundColor(.green)
-            }
-
             Text(track.durationText)
                 .font(.caption)
                 .foregroundColor(OVK.Palette.textSecondary)
 
-            if track.isPlayable || downloads.isDownloaded(track) { downloadButton }
+            trailingAccessory
         }
         .padding(.vertical, 4)
         .opacity(canPlay ? 1 : 0.6)
@@ -119,6 +97,17 @@ struct AudioRow: View {
         }
         .unavailableAudioAlert(isPresented: $showUnavailableAlert) {
             player.clearUnavailableTrack()
+        }
+    }
+
+    @ViewBuilder
+    private var trailingAccessory: some View {
+        if showAddedBadge && library.isAdded(track) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundColor(OVK.Palette.primary)
+        } else if track.isPlayable || downloads.isDownloaded(track) {
+            downloadButton
         }
     }
 
@@ -168,7 +157,8 @@ struct AudioRow: View {
             Button {
                 downloads.remove(track)
             } label: {
-                Image(systemName: "arrow.down.circle.fill").foregroundColor(.green)
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundColor(OVK.Palette.primary)
             }
             .buttonStyle(.plain)
         } else if downloads.inProgress.contains(track.key) {

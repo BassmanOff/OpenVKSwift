@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class FriendsViewModel: ObservableObject {
     @Published private(set) var friends: [User] = []
+    @Published private(set) var mutualFriendIDs = Set<Int>()
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
     private var loaded = false
@@ -26,11 +27,21 @@ final class FriendsViewModel: ObservableObject {
         )
         do {
             // user_id=0 → друзья текущего пользователя; поля для аватара и онлайн-устройства.
+            let requestedUserID = userID == 0 && settings.instance.isVepurOVK
+                ? settings.userID ?? 0
+                : userID
+            let fields = "photo_100,photo_50,online,last_seen,screen_name,friend_status"
             let res: ItemsResponse<User> = try await client.call(
                 "friends.get",
-                params: ["user_id": String(userID), "fields": "photo_100,photo_50,online,last_seen,screen_name", "count": "1000"]
+                params: ["user_id": String(requestedUserID), "fields": fields, "count": "1000"]
             )
-            friends = res.items
+            let isOwnList = userID == 0 || userID == settings.userID
+            let visibleFriends = res.items.filter {
+                !settings.instance.isVepurOVK || !isOwnList || $0.id != settings.userID
+            }
+            mutualFriendIDs = isOwnList ? [] : Set(visibleFriends.filter(\.isMutualFriend).map(\.id))
+            friends = visibleFriends.filter { mutualFriendIDs.contains($0.id) }
+                + visibleFriends.filter { !mutualFriendIDs.contains($0.id) }
             loaded = true
         } catch {
             if error.isCancellation { return }

@@ -22,7 +22,8 @@ struct ConversationRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     Text(author?.name ?? "Диалог")
-                        .font(.subheadline).fontWeight(.semibold)
+                        .font(.subheadline)
+                        .fontWeight(isUnread ? .semibold : .regular)
                         .foregroundColor(OVK.Palette.textPrimary)
                         .lineLimit(1)
                     Spacer()
@@ -36,6 +37,7 @@ struct ConversationRow: View {
                     if let last = convo.lastMessage {
                         Text((last.isOut ? "Вы: " : "") + last.text)
                             .font(.footnote)
+                            .fontWeight(isUnread ? .semibold : .regular)
                             .foregroundColor(OVK.Palette.textSecondary)
                             .lineLimit(1)
                     }

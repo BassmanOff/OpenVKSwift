@@ -55,7 +55,8 @@ struct Comment: Decodable, Identifiable, Hashable {
         // decodingHTMLEntities: сервер отдаёт текст пропущенным через htmlspecialchars
         // (см. TRichText::getText) — без раскодирования "<"/">"/"&" показывались бы как есть.
         text      = ((try? c.decode(String.self, forKey: .text)) ?? "").decodingHTMLEntities
-        canDelete = ((try? c.decode(Int.self, forKey: .canDelete)) ?? 0) == 1
+        canDelete = (try? c.decode(Bool.self, forKey: .canDelete))
+            ?? (((try? c.decode(Int.self, forKey: .canDelete)) ?? 0) == 1)
 
         if let likes = try? c.nestedContainer(keyedBy: LikesKeys.self, forKey: .likes) {
             likesCount = (try? likes.decode(Int.self, forKey: .count)) ?? 0

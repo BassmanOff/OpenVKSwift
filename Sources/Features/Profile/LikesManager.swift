@@ -7,6 +7,11 @@ final class LikesManager: ObservableObject {
     @Published private var overrides: [String: LikeState] = [:]
     @Published private var commentOverrides: [Int: LikeState] = [:]
 
+    func clear() {
+        overrides = [:]
+        commentOverrides = [:]
+    }
+
     func isLiked(_ post: Post) -> Bool { overrides[post.id]?.liked ?? post.userLikes }
     func count(_ post: Post) -> Int { overrides[post.id]?.count ?? post.likesCount }
 

@@ -4,10 +4,11 @@ import SwiftUI
 struct AlbumCover: View {
     let url: URL?
     var size: CGFloat
-    var corner: CGFloat = 6
+    var corner: CGFloat = OVK.Metrics.compactCornerRadius
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        CachedImage(url: url) {
+        CachedImage(url: url, maxPixelSize: size * displayScale) {
             ZStack {
                 OVK.Palette.background
                 Image(systemName: "music.note.list")
@@ -42,11 +43,8 @@ struct AlbumRow: View {
             if library.isBookmarked(album) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.footnote)
-                    .foregroundColor(.green)
+                    .foregroundColor(OVK.Palette.primary)
             }
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(OVK.Palette.textSecondary)
         }
         .padding(.vertical, 4)
         .contextMenu {
@@ -77,39 +75,16 @@ struct AlbumDetailView: View {
 
     var body: some View {
         List {
-            Section {
-                HStack(spacing: 16) {
-                    AlbumCover(url: album.coverImageURL, size: 96, corner: 10)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(album.title)
-                            .font(.headline)
-                            .foregroundColor(OVK.Palette.textPrimary)
-                        // Кол-во берём из реально загруженных треков: album.size недостоверен
-                        // при открытии по ссылке (getPlaylistById не отдаёт size → 0).
-                        // ponytail: потолок — 100 (count в audio.get); playlist >100 покажет "100".
-                        Text(Album.sizeText(model.tracks.isEmpty ? album.size : model.tracks.count))
-                            .font(.subheadline)
-                            .foregroundColor(OVK.Palette.textSecondary)
-                        if !album.description.isEmpty {
-                            Text(album.description)
-                                .font(.footnote)
-                                .foregroundColor(OVK.Palette.textSecondary)
-                                .lineLimit(3)
-                        }
-                    }
-                    Spacer()
-                }
-                .padding(.vertical, 4)
-            }
+            albumHeader
 
             if model.isLoading && model.tracks.isEmpty {
-                ProgressView().frame(maxWidth: .infinity)
+                OVKListStateView(message: "Загрузка треков…", isLoading: true)
             } else if model.tracks.isEmpty {
-                Text("Нет треков")
-                    .foregroundColor(OVK.Palette.textSecondary)
+                OVKListStateView(message: "Нет треков")
             } else {
                 ForEach(model.tracks) { track in
                     AudioRow(track: track)
+                        .ovkPlainListRow()
                         .contentShape(Rectangle())
                         .onTapGesture {
                             guard track.isPlayable else { return }
@@ -137,5 +112,33 @@ struct AlbumDetailView: View {
         .toast($library.toast)
         .task { await model.load(album: album, settings: settings) }
         .task { await library.hydrateBookmarks(settings: settings) }
+    }
+
+    private var albumHeader: some View {
+        HStack(spacing: 16) {
+            AlbumCover(url: album.coverImageURL, size: 96)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(album.title)
+                    .font(.headline)
+                    .foregroundColor(OVK.Palette.textPrimary)
+                // Кол-во берём из реально загруженных треков: album.size недостоверен
+                // при открытии по ссылке (getPlaylistById не отдаёт size → 0).
+                // ponytail: потолок — 100 (count в audio.get); playlist >100 покажет "100".
+                Text(Album.sizeText(model.tracks.isEmpty ? album.size : model.tracks.count))
+                    .font(.subheadline)
+                    .foregroundColor(OVK.Palette.textSecondary)
+                if !album.description.isEmpty {
+                    Text(album.description)
+                        .font(.footnote)
+                        .foregroundColor(OVK.Palette.textSecondary)
+                        .lineLimit(3)
+                }
+            }
+            Spacer()
+        }
+        .padding(OVK.Metrics.contentInset)
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom))
     }
 }

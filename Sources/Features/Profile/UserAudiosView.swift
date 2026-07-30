@@ -14,13 +14,10 @@ struct UserAudiosView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $scope) {
-                Text("Треки").tag(Scope.tracks)
-                Text("Альбомы").tag(Scope.albums)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            OVKSegmentedControl(
+                options: [(.tracks, "Треки"), (.albums, "Альбомы")],
+                selection: $scope
+            )
 
             switch scope {
             case .tracks: tracksContent
@@ -41,13 +38,11 @@ struct UserAudiosView: View {
     @ViewBuilder
     private var tracksContent: some View {
         if model.isLoading && model.tracks.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка аудиозаписей…", isLoading: true)
         } else if let error = model.errorMessage, model.tracks.isEmpty {
             ErrorRetry(message: error) { Task { await model.load(ownerID: ownerID, settings: settings) } }
         } else if model.tracks.isEmpty {
-            Text("Нет аудиозаписей")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Нет аудиозаписей")
         } else {
             List(model.tracks) { track in
                 AudioRow(track: track)
@@ -60,6 +55,7 @@ struct UserAudiosView: View {
                             player.play(track, in: model.tracks.filter { $0.isPlayable })
                         }
                     }
+                    .ovkPlainListRow()
             }
             .listStyle(.plain)
             .refreshable { await model.load(ownerID: ownerID, settings: settings) }
@@ -69,11 +65,9 @@ struct UserAudiosView: View {
     @ViewBuilder
     private var albumsContent: some View {
         if model.albumsLoading && model.albums.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка альбомов…", isLoading: true)
         } else if model.albums.isEmpty {
-            Text("Нет альбомов")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Нет альбомов")
         } else {
             List(model.albums) { album in
                 NavigationLink {
@@ -81,6 +75,7 @@ struct UserAudiosView: View {
                 } label: {
                     AlbumRow(album: album)
                 }
+                .ovkPlainListRow()
             }
             .listStyle(.plain)
             .refreshable { await model.loadAlbums(ownerID: ownerID, settings: settings, force: true) }

@@ -43,13 +43,11 @@ struct TopicsView: View {
     var body: some View {
         Group {
             if model.isLoading && model.topics.isEmpty {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                OVKListStateView(message: "Загрузка обсуждений…", isLoading: true)
             } else if let error = model.errorMessage, model.topics.isEmpty {
                 ErrorRetry(message: error) { Task { await model.load(groupID: groupID, settings: settings) } }
             } else if model.topics.isEmpty {
-                Text("Нет обсуждений")
-                    .foregroundColor(OVK.Palette.textSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                OVKListStateView(message: "Нет обсуждений")
             } else {
                 List(model.topics) { topic in
                     NavigationLink {
@@ -76,6 +74,7 @@ struct TopicsView: View {
                         }
                         .padding(.vertical, 2)
                     }
+                    .ovkPlainListRow()
                 }
                 .listStyle(.plain)
                 .refreshable { await model.load(groupID: groupID, settings: settings) }

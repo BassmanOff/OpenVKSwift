@@ -15,21 +15,23 @@ struct NewsfeedView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                Picker("", selection: Binding(
-                    get: { model.kind },
-                    set: { newKind in Task { await model.switchTo(newKind, settings: settings) } }
-                )) {
-                    Text("Моя лента").tag(NewsfeedViewModel.Kind.my)
-                    Text("Все записи").tag(NewsfeedViewModel.Kind.global)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+                OVKSegmentedControl(
+                    options: [
+                        (.my, "Моя лента"),
+                        (.global, "Все записи")
+                    ],
+                    selection: Binding(
+                        get: { model.kind },
+                        set: { newKind in
+                            Task { await model.switchTo(newKind, settings: settings) }
+                        }
+                    )
+                )
 
                 content
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(OVK.Palette.background.ignoresSafeArea())
+            .background(OVK.Palette.background)
             .navigationTitle("Новости")
             .navigationBarTitleDisplayMode(.inline)
             .pushesGlobalLinks(tab: 0) // ссылки из ленты/«Ответов» пушатся в стек этой вкладки
@@ -53,7 +55,7 @@ struct NewsfeedView: View {
                     }
                 }
             }
-            .task { await model.loadIfNeeded(settings: settings) }
+            .task { await model.loadInitial(settings: settings) }
             // Первичная загрузка активности; периодический refresh ведёт MainTabView
             // (чтобы бейдж вкладки жил независимо от того, открыта ли лента).
             .task { await activity.loadIfNeeded(settings: settings) }
@@ -67,6 +69,7 @@ struct NewsfeedView: View {
         // Явный stack-стиль: без него NavigationView в кастомном контейнере может
         // выбрать split-раскладку с некорректным позиционированием навбара (iOS 15).
         .navigationViewStyle(.stack)
+        .toast($model.actionError)
     }
 
     @ViewBuilder
@@ -102,13 +105,12 @@ struct NewsfeedView: View {
     private var feedList: some View {
         List {
             ForEach(model.posts) { post in
-                card {
-                    PostRow(post: post, authors: model.authors, onDelete: { p in
-                        Task { await model.delete(p, settings: settings) }
-                    }, onEdited: { p in
-                        Task { await model.refreshPost(ownerID: p.ownerID, postID: p.postID, settings: settings) }
-                    })
-                }
+                PostRow(post: post, authors: model.authors, onDelete: { p in
+                    Task { await model.delete(p, settings: settings) }
+                }, onEdited: { p in
+                    Task { await model.refreshPost(ownerID: p.ownerID, postID: p.postID, settings: settings) }
+                })
+                .ovkPostListRow()
                 .onAppear {
                     if post.id == model.posts.last?.id {
                         print("[Feed] onAppear last item: \(post.id), loadingMore: \(model.isLoadingMore)")
@@ -129,13 +131,4 @@ struct NewsfeedView: View {
         .refreshable { await model.reload(settings: settings) }
     }
 
-    private func card<V: View>(@ViewBuilder _ content: () -> V) -> some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(OVK.Palette.card)
-            .padding(.bottom, 8)
-            .listRowInsets(EdgeInsets())
-            .listRowSeparator(.hidden)
-            .listRowBackground(OVK.Palette.background)
-    }
 }

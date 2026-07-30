@@ -44,6 +44,7 @@ struct OVKClient {
     }()
 
     private func requestRaw(_ method: String, params: [String: String] = [:]) async throws -> Data {
+        let (method, params) = instance.routedAPICall(method: method, params: params)
         let endpoint = instance.apiURL
             .appendingPathComponent("method")
             .appendingPathComponent(method)
@@ -69,6 +70,7 @@ struct OVKClient {
         let (data, response) = try await Self.apiSession.data(for: request)
 
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            if let error = OVKError.apiResponseError(from: data) { throw error }
             throw OVKError.http(http.statusCode)
         }
         return data
@@ -123,7 +125,8 @@ struct OVKClient {
 
     func uploadWallPhoto(jpeg data: Data) async throws -> String? {
         let server: WallUploadServer = try await call("photos.getWallUploadServer")
-        guard let url = URL(string: server.uploadURL) else { return nil }
+        guard let rawURL = URL(string: server.uploadURL) else { return nil }
+        let url = instance.routedServiceURL(rawURL)
         let responseData = try await uploadImage(data, to: url)
         let upload = try JSONDecoder().decode(WallUploadResult.self, from: responseData)
         let saved: [Photo] = try await call("photos.saveWallPhoto", params: ["photo": upload.photo, "hash": upload.hash])
@@ -150,7 +153,8 @@ struct OVKClient {
         let server: AlbumUploadServer = try await call(
             "photos.getUploadServer", params: ["album_id": String(albumID)]
         )
-        guard let url = URL(string: server.uploadURL) else { return nil }
+        guard let rawURL = URL(string: server.uploadURL) else { return nil }
+        let url = instance.routedServiceURL(rawURL)
         let responseData = try await uploadImage(data, to: url, field: "photo1")
         let upload = try JSONDecoder().decode(AlbumUploadResult.self, from: responseData)
         let saved: ItemsResponse<Photo> = try await call("photos.save", params: [
@@ -170,7 +174,8 @@ struct OVKClient {
         let server: OwnerUploadServer = try await call(
             "photos.getOwnerPhotoUploadServer", params: ["owner_id": String(ownerID)]
         )
-        guard let url = URL(string: server.uploadURL) else { throw OVKError.empty }
+        guard let rawURL = URL(string: server.uploadURL) else { throw OVKError.empty }
+        let url = instance.routedServiceURL(rawURL)
         let responseData = try await uploadImage(data, to: url)
         let upload = try JSONDecoder().decode(OwnerUploadResult.self, from: responseData)
         try await execute("photos.saveOwnerPhoto", params: ["photo": upload.photo, "hash": upload.hash])

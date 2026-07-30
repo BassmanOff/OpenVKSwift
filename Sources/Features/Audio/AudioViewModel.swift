@@ -14,15 +14,12 @@ final class AudioViewModel: ObservableObject {
     @Published var diagnosticRaw: String?
 
     /// Кэш «Моей музыки» — чтобы список был виден и офлайн.
-    private static let cacheURL: URL = {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("my_tracks_cache.json")
-    }()
+    private let cacheScope = AccountCacheScope.current()
 
     func load(settings: AppSettings) async {
         guard let token = settings.token else { return }
         // Мгновенно показываем кэш, чтобы список был виден сразу (в т.ч. офлайн).
-        if tracks.isEmpty, let cached = Self.loadCache() { tracks = cached }
+        if tracks.isEmpty, let cached = loadCache() { tracks = cached }
 
         isLoading = tracks.isEmpty
         errorMessage = nil
@@ -33,13 +30,17 @@ final class AudioViewModel: ObservableObject {
             token: token,
             apiVersion: settings.apiVersion
         )
+        var params = ["count": "100"]
+        if settings.instance.needsExplicitAudioOwner, let userID = settings.userID {
+            params["owner_id"] = String(userID)
+        }
         do {
             let result: ItemsResponse<Audio> = try await client.call(
                 "audio.get",
-                params: ["count": "100"]
+                params: params
             )
             tracks = result.items
-            Self.saveCache(result.items)
+            saveCache(result.items)
         } catch {
             if error.isCancellation { return }
             // Офлайн/ошибка: если есть кэш — оставляем его без ошибки, иначе показываем ошибку.
@@ -47,20 +48,20 @@ final class AudioViewModel: ObservableObject {
         }
     }
 
-    private static func saveCache(_ items: [Audio]) {
+    private func saveCache(_ items: [Audio]) {
         if let data = try? JSONEncoder().encode(items) {
-            try? data.write(to: cacheURL, options: .atomic)
+            try? data.write(to: cacheScope.file("my_tracks_cache.json"), options: .atomic)
         }
     }
 
-    private static func loadCache() -> [Audio]? {
-        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
+    private func loadCache() -> [Audio]? {
+        guard let data = try? Data(contentsOf: cacheScope.file("my_tracks_cache.json")) else { return nil }
         return try? JSONDecoder().decode([Audio].self, from: data)
     }
 
     /// Стирает дисковый кэш списка «Моей музыки» — отладка из настроек.
     static func clearCache() {
-        try? FileManager.default.removeItem(at: cacheURL)
+        AccountCacheScope.current().removeFiles(prefixes: ["my_tracks_cache.json"])
     }
 
     /// Загружает аудиозаписи конкретного пользователя (audio.get с owner_id).

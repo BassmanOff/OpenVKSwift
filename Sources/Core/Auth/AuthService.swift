@@ -2,9 +2,7 @@ import Foundation
 
 /// Авторизация по логину/паролю через эндпоинт `/token` (direct auth, как у VK).
 ///
-/// Важно: токен запрашиваем у API-домена (`instance.apiURL`), а НЕ у веб-домена.
-/// У openvk.org веб-домен закрыт антиботом greyweb (JS-челлендж, 403),
-/// а `api.openvk.org` отдаёт и /token, и /method без челленджа.
+/// Адрес direct-auth задаёт инстанс: OpenVK использует API-домен, VepurOVK — веб-домен.
 struct AuthService {
     let instance: Instance
 
@@ -43,7 +41,7 @@ struct AuthService {
                 code: String? = nil,
                 // `openvk_ios` распознаётся сервером как iOS → статус «онлайн с iPhone».
                 clientName: String = "openvk_ios") async throws -> TokenResponse {
-        let endpoint = instance.apiURL.appendingPathComponent("token")
+        let endpoint = instance.tokenURL
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
             throw OVKError.badURL
         }

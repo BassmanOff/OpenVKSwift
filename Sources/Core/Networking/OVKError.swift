@@ -9,6 +9,12 @@ enum OVKError: LocalizedError {
     case notAuthorized
     case empty
 
+    static func apiResponseError(from data: Data) -> OVKError? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let code = object["error_code"] as? Int else { return nil }
+        return .api(code: code, message: object["error_msg"] as? String ?? "Ошибка \(code)")
+    }
+
     var errorDescription: String? {
         switch self {
         case .badURL:                return "Некорректный адрес запроса"

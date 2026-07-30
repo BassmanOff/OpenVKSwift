@@ -11,6 +11,9 @@ struct User: Decodable, Identifiable, Hashable {
     let photoMax: String?
     let screenName: String?
     let status: String?
+    /// Базовая проверка видимости профиля из users.get. Точная wall.write-приватность
+    /// сервер не раскрывает и повторно проверяет уже в wall.post.
+    let canAccessClosed: Bool
     var online: Bool
     let cityTitle: String?
     let about: String?
@@ -22,9 +25,14 @@ struct User: Decodable, Identifiable, Hashable {
     let counters: Counters?
     /// Код платформы из last_seen.platform (VK: 2=iPhone, 4=Android, 7=web, 1=mobile). nil если оффлайн.
     var lastSeenPlatform: Int?
+    /// Unix-время последней активности из last_seen.time. Сервер не присылает его для
+    /// онлайн-пользователя или при закрытой приватности.
+    var lastSeenTime: Int?
     /// Статус дружбы (API friend_status, уже переставлено сервером в users.get):
     /// 0 — нет, 1 — заявка отправлена (исходящая), 2 — заявка получена (входящая), 3 — друг.
     let friendStatus: Int?
+    /// Пользователь — друг текущего аккаунта. В списке друзей другого профиля это общий друг.
+    var isMutualFriend: Bool { friendStatus == 3 }
     /// Трек, который слушает пользователь прямо сейчас (users.get?fields=status → status_audio).
     /// Не зависит от друзей/подписок — приходит вместе с обычной загрузкой профиля.
     let statusAudio: Audio?
@@ -68,6 +76,39 @@ struct User: Decodable, Identifiable, Hashable {
     }
 
     var fullName: String { "\(firstName) \(lastName)" }
+
+    var compactAge: String? {
+        guard let bdate else { return nil }
+        let parts = bdate.split(separator: ".").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count >= 3, (1...12).contains(parts[1]), (1...31).contains(parts[0]) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        guard let birthDate = calendar.date(from: DateComponents(year: parts[2], month: parts[1], day: parts[0])),
+              let age = calendar.dateComponents([.year], from: birthDate, to: Date()).year,
+              age >= 0 else { return nil }
+        return "\(age) \(Self.ageWord(age))"
+    }
+
+    /// День и месяц доступны даже когда год рождения скрыт.
+    func hasBirthday(on date: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard let bdate else { return false }
+        let parts = bdate.split(separator: ".").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count >= 2 else { return false }
+        let today = calendar.dateComponents([.month, .day], from: date)
+        return parts[0] == today.day && parts[1] == today.month
+    }
+
+    var activityDisplay: String? {
+        if online { return "онлайн" }
+        guard let lastSeenTime else { return nil }
+        let interval = max(0, Int(Date().timeIntervalSince1970) - lastSeenTime)
+        switch interval {
+        case ..<60: return "был(а) только что"
+        case ..<3600: return "был(а) \(interval / 60) мин назад"
+        case ..<86_400: return "был(а) \(interval / 3600) ч назад"
+        default: return "был(а) \(interval / 86_400) дн назад"
+        }
+    }
 
     /// «18 апреля 2002 (24 года)» — сервер отдаёт bdate как "D.M" (год скрыт настройками
     /// приватности) или "D.M.Y" (год показан), см. VKAPI/Handlers/Users.php::get case "bdate".
@@ -128,14 +169,16 @@ struct User: Decodable, Identifiable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, status, about, bdate, sex, counters, online, city
+        case id, uid, status, about, bdate, sex, counters, online, city, photo
         case firstName = "first_name"
         case lastName = "last_name"
         case photo200 = "photo_200"
         case photo100 = "photo_100"
         case photo50 = "photo_50"
         case photoMax = "photo_max"
+        case photoMediumRec = "photo_medium_rec"
         case screenName = "screen_name"
+        case canAccessClosed = "can_access_closed"
         case lastSeen = "last_seen"
         case friendStatus = "friend_status"
         case statusAudio = "status_audio"
@@ -144,19 +187,24 @@ struct User: Decodable, Identifiable, Hashable {
     }
 
     private enum CityKeys: String, CodingKey { case title }
-    private enum LastSeenKeys: String, CodingKey { case platform }
+    private enum LastSeenKeys: String, CodingKey { case platform, time }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id         = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        id         = (try? c.decode(Int.self, forKey: .id))
+            ?? (try? c.decode(Int.self, forKey: .uid)) ?? 0
         firstName  = (try? c.decode(String.self, forKey: .firstName)) ?? ""
         lastName   = (try? c.decode(String.self, forKey: .lastName)) ?? ""
         photo200   = try? c.decode(String.self, forKey: .photo200)
-        photo100   = try? c.decode(String.self, forKey: .photo100)
-        photo50    = try? c.decode(String.self, forKey: .photo50)
+        photo100   = (try? c.decode(String.self, forKey: .photo100))
+            ?? (try? c.decode(String.self, forKey: .photoMediumRec))
+        photo50    = (try? c.decode(String.self, forKey: .photo50))
+            ?? (try? c.decode(String.self, forKey: .photo))
         photoMax   = try? c.decode(String.self, forKey: .photoMax)
         screenName = try? c.decode(String.self, forKey: .screenName)
         status     = try? c.decode(String.self, forKey: .status)
+        canAccessClosed = (try? c.decode(Bool.self, forKey: .canAccessClosed))
+            ?? (((try? c.decode(Int.self, forKey: .canAccessClosed)) ?? 0) == 1)
         // online присутствует (=1) только когда пользователь онлайн, иначе ключа нет.
         online     = ((try? c.decode(Int.self, forKey: .online)) ?? 0) == 1
         about      = try? c.decode(String.self, forKey: .about)
@@ -183,8 +231,10 @@ struct User: Decodable, Identifiable, Hashable {
         }
         if let lsC = try? c.nestedContainer(keyedBy: LastSeenKeys.self, forKey: .lastSeen) {
             lastSeenPlatform = try? lsC.decode(Int.self, forKey: .platform)
+            lastSeenTime = try? lsC.decode(Int.self, forKey: .time)
         } else {
             lastSeenPlatform = nil
+            lastSeenTime = nil
         }
     }
 }

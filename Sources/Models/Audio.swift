@@ -3,6 +3,8 @@ import Foundation
 struct Audio: Codable, Hashable, Identifiable {
     let audioID: Int
     let ownerID: Int
+    /// Base64-id записи в БД, который использует отдельная веб-страница трека.
+    let uniqueID: String?
     let artist: String
     let title: String
     let duration: Int
@@ -34,6 +36,15 @@ struct Audio: Codable, Hashable, Identifiable {
         return URL(string: url)
     }
 
+    /// Ссылка на страницу трека: на компьютере её можно открыть и добавить запись в коллекцию.
+    func messageAttachmentText(webURL: URL) -> String {
+        let pageID = uniqueID
+            .flatMap { Data(base64Encoded: $0) }
+            .flatMap { String(data: $0, encoding: .utf8) }
+            .flatMap(Int.init) ?? audioID
+        return "\(webURL.appendingPathComponent("audio\(ownerID)_\(pageID)").absoluteString)\n\(artist) — \(title)"
+    }
+
     /// Можно ли воспроизвести «как есть» (есть прямой MP3).
     var isPlayable: Bool { playbackURL != nil }
 
@@ -49,6 +60,7 @@ struct Audio: Codable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case audioID = "id"
         case ownerID = "owner_id"
+        case uniqueID = "unique_id"
         case artist
         case title
         case duration
@@ -65,6 +77,7 @@ struct Audio: Codable, Hashable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         audioID   = try c.decode(Int.self, forKey: .audioID)
         ownerID   = try c.decode(Int.self, forKey: .ownerID)
+        uniqueID  = try? c.decode(String.self, forKey: .uniqueID)
         artist    = (try? c.decode(String.self, forKey: .artist)) ?? ""
         title     = (try? c.decode(String.self, forKey: .title)) ?? ""
         duration  = (try? c.decode(Int.self, forKey: .duration)) ?? 0
@@ -83,6 +96,50 @@ struct Audio: Codable, Hashable, Identifiable {
         if let s = try? c.decode(String.self, forKey: key), !s.isEmpty { return s }
         return nil
     }
+}
+
+struct MessageAudioLink: Equatable {
+    let url: URL
+    let databaseID: Int
+    let title: String
+    let artist: String
+}
+
+/// Разбирает отправленную нами ссылку на страницу трека и подпись «исполнитель — название».
+func messageAudioLink(in text: String) -> MessageAudioLink? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    let lineBreak = trimmed.firstIndex(where: \.isNewline)
+    let urlText = lineBreak.map { String(trimmed[..<$0]) } ?? trimmed
+    let caption = lineBreak.map {
+        String(trimmed[trimmed.index(after: $0)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    } ?? ""
+
+    guard let url = URL(string: urlText), let host = url.host?.lowercased() else { return nil }
+    let domains = ["openvk.org", "openvk.xyz", "vepurovk.xyz", "vepurovk.fun"]
+    guard domains.contains(where: { host == $0 || host.hasSuffix(".\($0)") }) else { return nil }
+
+    let prefix = "/audio"
+    guard url.path.hasPrefix(prefix) else { return nil }
+    let ids = url.path.dropFirst(prefix.count).split(separator: "_", maxSplits: 1)
+    guard ids.count == 2, Int(ids[0]) != nil, let databaseID = Int(ids[1]) else { return nil }
+
+    if let separator = caption.range(of: " — ") {
+        let artist = String(caption[..<separator.lowerBound])
+        let title = String(caption[separator.upperBound...])
+        return MessageAudioLink(
+            url: url,
+            databaseID: databaseID,
+            title: title.isEmpty ? "Аудиозапись" : title,
+            artist: artist
+        )
+    }
+    return MessageAudioLink(
+        url: url,
+        databaseID: databaseID,
+        title: caption.isEmpty ? "Аудиозапись" : caption,
+        artist: ""
+    )
 }
 
 /// Обёртка ответа VK-методов вида { count, items: [...] }.

@@ -13,6 +13,8 @@ struct VideoPlayerScreen: View {
     @State private var isScrubbing = false
     @State private var scrubValue: Double = 0
     @State private var landscape = false
+    @State private var retryID = 0
+    @State private var resumeAudioOnDismiss = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -31,28 +33,49 @@ struct VideoPlayerScreen: View {
             .padding()
         }
         .onAppear {
-            if audioPlayer.isPlaying { audioPlayer.pause() } // не мешаем звук музыки и видео
+            resumeAudioOnDismiss = audioPlayer.isPlaying
+            if resumeAudioOnDismiss { audioPlayer.pause() } // не мешаем звук музыки и видео
+            landscape = video.startsLandscape
             AppDelegate.setVideoOrientation(true) // разрешить ландшафт на время видео
+            if landscape { AppDelegate.forceRotate(to: .landscapeRight) }
         }
         .onDisappear {
             vlc.stop()
             AppDelegate.setVideoOrientation(false) // вернуть портрет
+            if resumeAudioOnDismiss { audioPlayer.resume() }
+        }
+        .task(id: showControls && vlc.isPlaying && !isScrubbing && vlc.errorMessage == nil) {
+            guard showControls && vlc.isPlaying && !isScrubbing && vlc.errorMessage == nil else { return }
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation { showControls = false }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if let stream = video.streamURL {
+        if let stream = video.playbackURL {
             ZStack {
                 VLCVideoSurface(url: stream, duration: video.duration, controller: vlc)
+                    .id(retryID)
                     .ignoresSafeArea()
-                    .onTapGesture { withAnimation { showControls.toggle() } }
+                    .onTapGesture { withAnimation { showControls = !showControls } }
 
-                if vlc.isBuffering {
+                if let error = vlc.errorMessage {
+                    VStack(spacing: 12) {
+                        Text(error).foregroundColor(.white)
+                        Button("Повторить") {
+                            vlc.stop()
+                            retryID += 1
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(OVK.Palette.primary)
+                    }
+                } else if vlc.isBuffering {
                     ProgressView().tint(.white).scaleEffect(1.4)
                 }
 
-                if showControls {
+                if showControls && vlc.errorMessage == nil {
                     controlsOverlay
                 }
             }
@@ -67,11 +90,25 @@ struct VideoPlayerScreen: View {
 
     private var controlsOverlay: some View {
         ZStack {
-            Button { vlc.togglePlayPause() } label: {
-                Image(systemName: vlc.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 64))
-                    .foregroundColor(.white.opacity(0.9))
-                    .shadow(radius: 4)
+            VStack {
+                Text(video.title.isEmpty ? "Видео" : video.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .padding(.horizontal, 64)
+                    .padding(.top, 20)
+                Spacer()
+            }
+
+            HStack(spacing: 28) {
+                skipButton(seconds: -10, symbol: "gobackward.10")
+                Button { vlc.togglePlayPause() } label: {
+                    Image(systemName: vlc.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 64))
+                        .foregroundColor(.white.opacity(0.9))
+                        .shadow(radius: 4)
+                }
+                skipButton(seconds: 10, symbol: "goforward.10")
             }
 
             VStack {
@@ -91,6 +128,7 @@ struct VideoPlayerScreen: View {
                             } else {
                                 vlc.seek(toSeconds: scrubValue)
                                 isScrubbing = false
+                                showControls = true
                             }
                         }
                     )
@@ -116,6 +154,15 @@ struct VideoPlayerScreen: View {
     }
 
     private var displaySeconds: Double { isScrubbing ? scrubValue : vlc.currentSeconds }
+
+    private func skipButton(seconds: Double, symbol: String) -> some View {
+        Button { vlc.seek(by: seconds) } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 28, weight: .medium))
+                .foregroundColor(.white)
+                .frame(width: OVK.Metrics.minimumTapSize, height: OVK.Metrics.minimumTapSize)
+        }
+    }
 
     private static func time(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }

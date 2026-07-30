@@ -187,15 +187,13 @@ struct TopicView: View {
     @ViewBuilder
     private var list: some View {
         if model.isLoading && model.comments.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка сообщений…", isLoading: true)
         } else if let error = model.errorMessage, model.comments.isEmpty {
             ErrorRetry(message: error) {
                 Task { await model.load(groupID: groupID, topicDBID: topicDBID, virtualIDGuess: virtualIDGuess, settings: settings) }
             }
         } else if model.comments.isEmpty {
-            Text("Пока нет сообщений")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Пока нет сообщений")
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -214,7 +212,7 @@ struct TopicView: View {
                             }
                         )
                             .background(OVK.Palette.card)
-                        Divider().padding(.leading, 58)
+                        OVKHairline().padding(.leading, 58)
                     }
                 }
             }

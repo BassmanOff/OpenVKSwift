@@ -1,28 +1,219 @@
 import SwiftUI
-import UIKit
 
 /// Лёгкое молочно-белое стекло в стиле экрана нового плеера.
-/// Не меняет effect при обновлениях SwiftUI — это важно для плавности прокрутки.
-struct LightGlassBackground: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        UIVisualEffectView(effect: UIBlurEffect(style: .extraLight))
-    }
+struct LightGlassBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
-    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
+    var body: some View {
+        if reduceTransparency || contrast == .increased {
+            Color.white
+        } else {
+            Rectangle().fill(.thinMaterial)
+        }
+    }
 }
 
-/// Небольшая вьюха «ошибка + повторить» (переиспользуется в списках).
+/// Единый разделитель толщиной в один физический пиксель.
+struct OVKHairline: View {
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        OVK.Palette.separator
+            .frame(height: 1 / displayScale)
+    }
+}
+
+extension View {
+    /// Плоская строка вторичного списка: системные отступы остаются нативными,
+    /// а разделитель всегда занимает один физический пиксель.
+    func ovkPlainListRow() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .listRowSeparator(.hidden)
+            .listRowBackground(OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom))
+    }
+
+    /// Единая строка записи для ленты и стен: белая плоскость, тонкие границы и
+    /// узкий серый интервал. Контент PostRow остаётся одинаковым во всех местах.
+    func ovkPostListRow() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .background(OVK.Palette.card)
+            .overlay(OVKHairline(), alignment: .top)
+            .overlay(OVKHairline(), alignment: .bottom)
+            .padding(.bottom, OVK.Metrics.compactCornerRadius)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(OVK.Palette.background)
+    }
+}
+
+/// Компактный сегментированный переключатель эпохи iOS 7: тонкая синяя рамка,
+/// синий выбранный сегмент и неизменная геометрия на всех поддерживаемых iOS.
+struct OVKSegmentedControl<Selection: Hashable>: View {
+    let options: [(value: Selection, title: String)]
+    @Binding var selection: Selection
+    var floatsOverPage = false
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        ZStack {
+            HStack(spacing: 0) {
+                ForEach(options.indices, id: \.self) { index in
+                    if index > options.startIndex {
+                        OVK.Palette.primary
+                            .frame(width: 1 / displayScale, height: 30)
+                    }
+                    visualSegment(options[index])
+                }
+            }
+            .frame(height: 30)
+            .clipShape(RoundedRectangle(cornerRadius: OVK.Metrics.compactCornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: OVK.Metrics.compactCornerRadius)
+                    .stroke(OVK.Palette.primary, lineWidth: 1 / displayScale)
+            }
+            .frame(maxHeight: .infinity, alignment: floatsOverPage ? .top : .center)
+
+            HStack(spacing: 0) {
+                ForEach(options.indices, id: \.self) { index in
+                    let option = options[index]
+                    Button { selection = option.value } label: {
+                        Color.clear
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(option.title)
+                    .accessibilityAddTraits(selection == option.value ? .isSelected : [])
+                }
+            }
+        }
+        .frame(height: OVK.Metrics.minimumTapSize)
+        .padding(.horizontal, OVK.Metrics.contentInset)
+        .background {
+            if floatsOverPage {
+                OVK.Palette.background
+            } else {
+                OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom)
+            }
+        }
+        .padding(.top, floatsOverPage ? OVK.Metrics.sectionSpacing : 0)
+    }
+
+    private func visualSegment(_ option: (value: Selection, title: String)) -> some View {
+        let selected = selection == option.value
+        return Text(option.title)
+            .font(.system(size: 13, weight: .regular))
+            .foregroundColor(selected ? .white : OVK.Palette.primary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(selected ? OVK.Palette.primary : OVK.Palette.card)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Постоянная строка поиска под навбаром. В отличие от `.searchable`, не принимает
+/// современную форму/отступы текущей версии iOS и не прыгает между состояниями скролла.
+struct OVKSearchStrip: View {
+    @Binding var text: String
+    let prompt: String
+    var floatsOverPage = false
+    @FocusState private var isFocused: Bool
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: OVK.Metrics.controlCornerRadius)
+                .fill(floatsOverPage ? OVK.Palette.card : OVK.Palette.background)
+                .frame(height: 32)
+                .overlay {
+                    RoundedRectangle(cornerRadius: OVK.Metrics.controlCornerRadius)
+                        .stroke(OVK.Palette.separator, lineWidth: 1 / displayScale)
+                        .frame(height: 32)
+                }
+
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(OVK.Palette.textSecondary)
+                    .accessibilityHidden(true)
+
+                TextField(prompt, text: $text)
+                    .font(.subheadline)
+                    .foregroundColor(OVK.Palette.textPrimary)
+                    .focused($isFocused)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .submitLabel(.search)
+                    .onSubmit { isFocused = false }
+
+                if !text.isEmpty {
+                    Button { text = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(OVK.Palette.textSecondary.opacity(0.7))
+                            .frame(width: OVK.Metrics.minimumTapSize,
+                                   height: OVK.Metrics.minimumTapSize)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Очистить поиск")
+                }
+            }
+            .padding(.leading, 9)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 32)
+        .frame(height: OVK.Metrics.minimumTapSize, alignment: floatsOverPage ? .bottom : .center)
+        .background {
+            if floatsOverPage {
+                OVK.Palette.background
+            } else {
+                OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom)
+            }
+        }
+    }
+}
+
+/// Единое спокойное состояние вторичного списка: загрузка, пустой результат или ошибка.
+struct OVKListStateView: View {
+    let message: String
+    var systemImage: String? = nil
+    var isLoading = false
+    var retry: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if isLoading {
+                ProgressView()
+            } else if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundColor(OVK.Palette.textSecondary)
+                    .accessibilityHidden(true)
+            }
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(OVK.Palette.textSecondary)
+                .multilineTextAlignment(.center)
+
+            if let retry {
+                Button("Повторить", action: retry)
+                    .font(.subheadline)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 96, maxHeight: .infinity)
+        .padding(.horizontal, OVK.Metrics.contentInset)
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(OVK.Palette.background)
+    }
+}
+
+/// Совместимое имя для существующих экранов с ошибкой и повтором.
 struct ErrorRetry: View {
     let message: String
     let retry: () -> Void
     var body: some View {
-        VStack(spacing: 12) {
-            Text(message)
-                .foregroundColor(OVK.Palette.textSecondary)
-                .multilineTextAlignment(.center)
-            Button("Повторить", action: retry)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        OVKListStateView(message: message, retry: retry)
     }
 }

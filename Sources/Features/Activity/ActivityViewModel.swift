@@ -7,6 +7,7 @@ import Combine
 final class ActivityViewModel: ObservableObject {
     @Published private(set) var notifications: [ActivityNotification] = []
     @Published private(set) var friendRequests: [User] = []
+    @Published private(set) var birthdayFriends: [User] = []
     /// id → имя/аватар (пользователи и сообщества-авторы активности).
     @Published private(set) var authors: [Int: WallViewModel.Author] = [:]
     @Published private(set) var isLoading = false
@@ -25,6 +26,7 @@ final class ActivityViewModel: ObservableObject {
     /// из-за чего список не обновлялся автоматически). OpenVK не шлёт LongPoll по
     /// активности — опрос единственный путь.
     private var pollTimer: AnyCancellable?
+    private var birthdayCheckDay = ""
 
     /// Бейдж на колокольчике: непросмотренные (после серверного last_viewed) + заявки в друзья.
     /// НЕ путать с watermark'ом баннеров (activity_notified_date в NotificationService):
@@ -80,7 +82,7 @@ final class ActivityViewModel: ObservableObject {
 
         // Уведомления и заявки в друзья — параллельно.
         async let notifsTask = fetchNotifications(client: client, offset: 0)
-        async let requestsTask = fetchFriendRequests(client: client)
+        async let requestsTask = fetchFriendRequests(client: client, currentUserID: settings.userID)
         let (notifs, requests) = await (notifsTask, requestsTask)
         mergeAuthors(
             profiles: (notifs?.profiles ?? []) + (requests ?? []),
@@ -107,6 +109,7 @@ final class ActivityViewModel: ObservableObject {
         if let requests {
             if friendRequests != requests { friendRequests = requests }
         }
+        await reloadBirthdaysIfNeeded(client: client, settings: settings)
         print("[Notifications] \(debugNow()) reload готов: notifs=\(notifications.count), заявок=\(friendRequests.count), lastViewed=\(lastViewed), unread=\(unreadCount)")
     }
 
@@ -127,12 +130,11 @@ final class ActivityViewModel: ObservableObject {
         guard let client = client(settings) else { return }
         // Парсим server last_viewed из ответа markAsViewed, чтобы бейдж погас
         // мгновенно (без полной перезагрузки, которая может быть заблокирована isReloading).
-        struct MarkResponse: Decodable {
-            let last_viewed: Int?
-        }
-        let resp: MarkResponse? = try? await client.call("notifications.markAsViewed", params: [:])
-        if let serverLastViewed = resp?.last_viewed {
-            lastViewed = serverLastViewed
+        do {
+            try await client.execute("notifications.markAsViewed")
+            lastViewed = max(lastViewed, notifications.map(\.date).max() ?? 0)
+        } catch {
+            // Следующий notifications.get вернёт серверный watermark; список не очищаем.
         }
         print("[Badge] \(debugNow()) markViewed: lastViewed=\(lastViewed), unread=\(unreadCount)")
     }
@@ -177,12 +179,30 @@ final class ActivityViewModel: ObservableObject {
         }
     }
 
-    private func fetchFriendRequests(client: OVKClient) async -> [User]? {
+    private func fetchFriendRequests(client: OVKClient, currentUserID: Int?) async -> [User]? {
         struct R: Decodable { let items: [User]? }
         let r: R? = try? await client.call(
             "friends.getRequests",
             params: ["count": "100", "extended": "1", "fields": "photo_100,photo_50,screen_name,online"]
         )
-        return r?.items
+        guard let users = r?.items else { return nil }
+        return ActivityCompatibility.friendRequests(users, currentUserID: currentUserID)
+    }
+
+    private func reloadBirthdaysIfNeeded(client: OVKClient, settings: AppSettings) async {
+        let day = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
+        guard birthdayCheckDay != day else { return }
+        struct R: Decodable { let items: [User] }
+        guard let response: R = try? await client.call(
+            "friends.get",
+            params: [
+                "user_id": settings.instance.isVepurOVK ? settings.userID.map(String.init) ?? "0" : "0",
+                "fields": "bdate,photo_100,photo_50,screen_name",
+                "count": "1000"
+            ]
+        ) else { return }
+        birthdayCheckDay = day
+        let birthdays = response.items.filter { $0.id != settings.userID && $0.hasBirthday() }
+        if birthdayFriends != birthdays { birthdayFriends = birthdays }
     }
 }

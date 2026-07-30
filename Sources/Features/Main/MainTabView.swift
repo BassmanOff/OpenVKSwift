@@ -34,19 +34,12 @@ struct MainTabView: View {
     @StateObject private var friendsTab = FriendsTabViewModel()
 
     var body: some View {
-        // Явная раскладка: контент → мини-плеер → таб-бар. Так музыка НИКОГДА не перекрывает
-        // ни меню, ни нижние панели разделов (например, вкладки в «Сообществах»).
+        // Контент и нижний хром занимают разные реальные области layout. safeAreaInset
+        // лишь менял safe area вложенных NavigationView, но не обрезал их собственный frame:
+        // из-за этого край некоторых страниц оставался виден под меню и мини-плеером.
         VStack(spacing: 0) {
             content
-            if player.current != nil {
-                MiniPlayerView(onExpand: { openPlayer() })
-            }
-            // Чип черновика поста — «свёрнутый композер» (как мини-приложения Telegram):
-            // виден, пока черновик существует; любой открытый композер-sheet накрывает его сам.
-            if drafts.draft != nil {
-                draftChip
-            }
-            tabBar
+            bottomRegion
         }
         // Новый плеер — ОВЕРЛЕЙ в той же иерархии (не модалка): BlurBackdrop внутри размывает
         // эти же вкладки, а свайп-вниз открывает их из-под плеера. Смонтирован ПОСТОЯННО и
@@ -56,6 +49,9 @@ struct MainTabView: View {
             if settings.useNewPlayer {
                 VKPlayerView(isPresented: $showPlayer)
                     .zIndex(10)
+                    // Финальная граница hit-testing находится у владельца overlay:
+                    // скрытый постоянно смонтированный плеер не участвует в касаниях.
+                    .allowsHitTesting(showPlayer)
             }
         }
         // ГЛОБАЛЬНЫЙ перехват ссылок OpenVK: override навешен НАД всеми вкладками → наследуется
@@ -182,6 +178,30 @@ struct MainTabView: View {
         }
     }
 
+    /// Чип черновика остаётся отдельной непрозрачной поверхностью, а мини-плеер и таб-бар
+    /// образуют один стеклянный tray с единственным UIVisualEffectView.
+    private var bottomRegion: some View {
+        VStack(spacing: 0) {
+            if drafts.draft != nil {
+                draftChip
+            }
+            bottomGlassTray
+        }
+    }
+
+    private var bottomGlassTray: some View {
+        VStack(spacing: 0) {
+            if player.current != nil {
+                MiniPlayerView(onExpand: { openPlayer() })
+                OVKHairline()
+            } else {
+                OVKHairline()
+            }
+            tabBar
+        }
+        .background(LightGlassBackground().ignoresSafeArea(edges: .bottom))
+    }
+
     /// Все вкладки смонтированы (сохраняем их состояние навигации); видна и активна одна.
     private var content: some View {
         MountedTabs(
@@ -263,14 +283,16 @@ struct MainTabView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(OVK.Palette.textSecondary)
-                    .padding(6) // зона нажатия побольше самой иконки
+                    .frame(width: OVK.Metrics.minimumTapSize,
+                           height: OVK.Metrics.minimumTapSize)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(OVK.Palette.card.overlay(Divider(), alignment: .top))
+        .padding(.leading, 12)
+        .padding(.trailing, 4)
+        .frame(minHeight: OVK.Metrics.minimumTapSize)
+        .background(OVK.Palette.card.overlay(OVKHairline(), alignment: .top))
         .contentShape(Rectangle())
         .onTapGesture { showDraftComposer = true }
         .confirmationDialog("Удалить черновик?", isPresented: $confirmDraftDiscard, titleVisibility: .visible) {
@@ -286,12 +308,7 @@ struct MainTabView: View {
             tabButton(.music, "Музыка", "music.note")
             tabButton(.profile, "Профиль", "person.crop.circle")
         }
-        .padding(.top, 6)
-        .background(
-            LightGlassBackground()
-                .ignoresSafeArea(edges: .bottom) // фон уходит под home-indicator
-                .overlay(Divider(), alignment: .top)
-        )
+        .frame(height: OVK.Metrics.tabBarHeight)
     }
 
     /// Новый плеер — оверлей, ему нужна анимация появления (.transition сработает только
@@ -332,7 +349,8 @@ struct MainTabView: View {
             }
             .foregroundColor(selection == tab ? OVK.Palette.primary : OVK.Palette.textSecondary)
             .frame(maxWidth: .infinity)
-            .padding(.bottom, 2)
+            .frame(maxHeight: .infinity)
+            .padding(.top, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

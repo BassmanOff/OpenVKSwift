@@ -20,6 +20,7 @@ final class ObjectResolver {
     private var communityCache: [Int: Community] = [:]
     private var photoCache: [String: Photo] = [:]
     private var videoCache: [String: Video] = [:]
+    private var audioCache: [Int: Audio] = [:]
     private var playlistCache: [String: Album] = [:]
     private var postCache: [String: ResolvedPost] = [:]
 
@@ -35,6 +36,7 @@ final class ObjectResolver {
         communityCache = [:]
         photoCache = [:]
         videoCache = [:]
+        audioCache = [:]
         playlistCache = [:]
         postCache = [:]
         failedKeys = []
@@ -74,9 +76,35 @@ final class ObjectResolver {
         return result
     }
 
+    /// Веб-ссылка `/audio{owner}_{id}` хранит во второй части id строки `audios`, поэтому
+    /// резолвим её через одиночную форму audio.getById, принимающую database id.
+    func audio(databaseID: Int, settings: AppSettings) async -> Audio? {
+        if let hit = audioCache[databaseID] { return hit }
+        guard let result: Audio = await fetch(
+            key: "audio:\(databaseID)", method: "audio.getById",
+            params: ["audios": String(databaseID)],
+            settings: settings,
+            extract: { (response: ItemsResponse<Audio>) in response.items.first }
+        ) else { return nil }
+        audioCache[databaseID] = result
+        return result
+    }
+
     func playlist(ownerID: Int, id: Int, settings: AppSettings) async -> Album? {
         let ref = "\(ownerID)_\(id)"
         if let hit = playlistCache[ref] { return hit }
+        if settings.instance.isVepurOVK {
+            guard let result: Album = await fetch(
+                key: "playlist:\(ref)", method: "audio.getPlaylists",
+                params: ["owner_id": String(ownerID), "count": "1000"],
+                settings: settings,
+                extract: { (response: ItemsResponse<Album>) in
+                    response.items.first { $0.albumID == id }
+                }
+            ) else { return nil }
+            playlistCache[ref] = result
+            return result
+        }
         guard let result: Album = await fetch(
             key: "playlist:\(ref)", method: "audio.getPlaylistById",
             params: ["owner_id": String(ownerID), "playlist_id": String(id)],

@@ -39,13 +39,11 @@ struct MembersView: View {
     var body: some View {
         Group {
             if model.isLoading && model.members.isEmpty {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                OVKListStateView(message: "Загрузка участников…", isLoading: true)
             } else if let error = model.errorMessage, model.members.isEmpty {
                 ErrorRetry(message: error) { Task { await model.load(groupID: groupID, settings: settings) } }
             } else if model.members.isEmpty {
-                Text("Нет участников")
-                    .foregroundColor(OVK.Palette.textSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                OVKListStateView(message: "Нет участников")
             } else {
                 List(model.members) { user in
                     NavigationLink {
@@ -53,6 +51,7 @@ struct MembersView: View {
                     } label: {
                         row(user)
                     }
+                    .ovkPlainListRow()
                 }
                 .listStyle(.plain)
                 .refreshable { await model.load(groupID: groupID, settings: settings) }

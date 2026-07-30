@@ -8,6 +8,7 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     @Published var isPlaying = false
     @Published var isBuffering = true
     @Published var currentSeconds: Double = 0
+    @Published var errorMessage: String?
 
     private var totalSeconds: Double = 1
 
@@ -21,6 +22,8 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     func attach(url: URL, duration: Int, to drawable: UIView) {
         guard player.media == nil else { return } // уже запущен
         totalSeconds = max(Double(duration), 1)
+        errorMessage = nil
+        isBuffering = true
         player.media = VLCMedia(url: url)
         player.drawable = drawable
         player.play()
@@ -35,8 +38,16 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
         currentSeconds = seconds
     }
 
+    func seek(by seconds: Double) {
+        seek(toSeconds: currentSeconds + seconds)
+    }
+
     func stop() {
         player.stop()
+        player.media = nil
+        player.drawable = nil
+        isPlaying = false
+        isBuffering = false
     }
 
     // MARK: - VLCMediaPlayerDelegate (VLC зовёт с своего потока → уходим на main)
@@ -45,6 +56,12 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
         DispatchQueue.main.async {
             self.isPlaying = self.player.isPlaying
             let state = self.player.state
+            if state == .error {
+                self.errorMessage = "Не удалось воспроизвести видео"
+                self.isPlaying = false
+                self.isBuffering = false
+                return
+            }
             // Буферизация — только пока плеер ещё не играет (иначе колёсико висит поверх видео).
             self.isBuffering = (state == .opening || state == .buffering) && !self.player.isPlaying
         }
@@ -53,6 +70,9 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
         DispatchQueue.main.async {
             self.currentSeconds = (self.player.time.value?.doubleValue ?? 0) / 1000.0
+            if let seconds = self.player.media?.length.value?.doubleValue, seconds > 0 {
+                self.totalSeconds = seconds / 1000.0
+            }
             // Время идёт — значит кадры пошли, буферизация закончилась.
             if self.isBuffering { self.isBuffering = false }
         }

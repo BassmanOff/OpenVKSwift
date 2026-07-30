@@ -15,6 +15,8 @@ struct AudioListView: View {
     @State private var tab: Tab = .online
     @State private var scope: Scope = .tracks
     @State private var searchText = ""
+    @State private var didSetInitialScrollPosition = false
+    @State private var didSetInitialScrollPositionAfterLoad = false
     /// Альбом, открытый по кнопке «К альбому» из плеера (программный push, см. .background ниже).
     @State private var routeAlbum: Album?
 
@@ -24,18 +26,86 @@ struct AudioListView: View {
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                if isSearching {
-                    searchSection
-                } else {
-                    librarySection
+            ScrollViewReader { proxy in
+                GeometryReader { geometry in
+                    List {
+                        OVKSearchStrip(text: $searchText, prompt: "Поиск треков и альбомов", floatsOverPage: true)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(OVK.Palette.background)
+
+                        if isSearching {
+                            OVKSegmentedControl(
+                                options: [
+                                    (.tracks, "Треки"),
+                                    (.albums, "Альбомы")
+                                ],
+                                selection: $scope,
+                                floatsOverPage: true
+                            )
+                            .id("music-content-start")
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(OVK.Palette.background)
+                            searchRows
+                        } else {
+                            OVKSegmentedControl(
+                                options: [
+                                    (.online, "Моя музыка"),
+                                    (.downloads, "Загрузки"),
+                                    (.playlists, "Плейлисты")
+                                ],
+                                selection: $tab,
+                                floatsOverPage: true
+                            )
+                            .id("music-content-start")
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(OVK.Palette.background)
+                            libraryRows
+                        }
+
+                        Color.clear
+                            .frame(height: scrollFillerHeight(in: geometry.size.height))
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(OVK.Palette.background)
+                    }
+                    .environment(\.defaultMinListRowHeight, 0)
+                    .listStyle(.plain)
+                    .overlay { contentStateOverlay }
+                    .refreshable { await refreshContent() }
+                    .onAppear {
+                        guard !didSetInitialScrollPosition else { return }
+                        didSetInitialScrollPosition = true
+                        DispatchQueue.main.async {
+                            proxy.scrollTo("music-content-start", anchor: .top)
+                        }
+                    }
+                    .onChange(of: model.isLoading) { isLoading in
+                        guard !isLoading,
+                              !didSetInitialScrollPositionAfterLoad,
+                              searchText.isEmpty else { return }
+                        didSetInitialScrollPositionAfterLoad = true
+                        DispatchQueue.main.async {
+                            proxy.scrollTo("music-content-start", anchor: .top)
+                        }
+                    }
+                    .onChange(of: model.tracks.count) { _ in
+                        guard !didSetInitialScrollPositionAfterLoad,
+                              searchText.isEmpty else { return }
+                        didSetInitialScrollPositionAfterLoad = true
+                        DispatchQueue.main.async {
+                            proxy.scrollTo("music-content-start", anchor: .top)
+                        }
+                    }
                 }
             }
             .navigationTitle("Музыка")
             .navigationBarTitleDisplayMode(.inline) // единый стиль навбара со всеми вкладками
             .pushesGlobalLinks(tab: 3) // ссылки из музыки пушатся в стек этой вкладки
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(OVK.Palette.background.ignoresSafeArea())
+            .background(OVK.Palette.background)
             // Программный переход к альбому играющего трека (кнопка «К альбому» в плеере).
             // Один NavigationLink(isActive:) в фоне — как в GroupView (не в строке List).
             .background(
@@ -51,11 +121,10 @@ struct AudioListView: View {
                 tab = .playlists       // назад из альбома пользователь попадёт в «Плейлисты»
                 routeAlbum = album
             }
-            .searchable(
-                text: $searchText,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Поиск треков и альбомов"
-            )
+            .task(id: tab) {
+                guard tab == .playlists else { return }
+                await playlists.loadIfNeeded(settings: settings)
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if tab == .downloads && !isSearching && !downloads.downloaded.isEmpty {
@@ -88,187 +157,160 @@ struct AudioListView: View {
         .toast($library.toast)
     }
 
-    // MARK: - Библиотека (Онлайн / Загрузки)
-
-    private var librarySection: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                Text("Онлайн").tag(Tab.online)
-                Text("Загрузки").tag(Tab.downloads)
-                Text("Плейлисты").tag(Tab.playlists)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-
-            switch tab {
-            case .online:    onlineContent
-            case .downloads: downloadsContent
-            case .playlists: playlistsContent
-            }
-        }
-    }
+    // MARK: - Содержимое единственного списка
 
     @ViewBuilder
-    private var onlineContent: some View {
-        if model.isLoading && model.tracks.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = model.errorMessage, model.tracks.isEmpty {
-            VStack(spacing: 12) {
-                Text(error)
-                    .foregroundColor(OVK.Palette.textSecondary)
-                    .multilineTextAlignment(.center)
-                Button("Повторить") { Task { await model.load(settings: settings) } }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
-        } else if model.tracks.isEmpty {
-            Text("Нет аудиозаписей")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            List(model.tracks) { track in
+    private var libraryRows: some View {
+        switch tab {
+        case .online:
+            ForEach(model.tracks) { track in
                 AudioRow(track: track)
                     .contentShape(Rectangle())
                     .onTapGesture { tapTrack(track, in: model.tracks.filter { $0.isPlayable }, autoDownload: true, source: "Моя музыка") }
             }
-            .listStyle(.plain)
-            .refreshable { await model.load(settings: settings) }
-        }
-    }
-
-    @ViewBuilder
-    private var downloadsContent: some View {
-        if downloads.downloaded.isEmpty {
-            VStack(spacing: 8) {
-                Image(systemName: "arrow.down.circle")
-                    .font(.largeTitle)
-                    .foregroundColor(OVK.Palette.textSecondary)
-                Text("Нет скачанных треков")
-                    .foregroundColor(OVK.Palette.textSecondary)
-                Text("Нажмите ↓ у трека во вкладке «Онлайн», чтобы слушать офлайн")
-                    .font(.footnote)
-                    .foregroundColor(OVK.Palette.textSecondary)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
-        } else {
-            List {
-                ForEach(downloads.downloaded) { track in
-                    AudioRow(track: track, showAddToLibrary: false)
-                        .contentShape(Rectangle())
-                        .onTapGesture { tapTrack(track, in: downloads.downloaded, source: "Загрузки") }
-                }
-                .onMove { downloads.move(from: $0, to: $1) }
-                .onDelete { offsets in
-                    offsets.map { downloads.downloaded[$0] }.forEach { downloads.remove($0) }
-                }
-            }
-            .listStyle(.plain)
-        }
-    }
-
-    // MARK: - Плейлисты
-
-    private var playlistsContent: some View {
-        Group {
-            if playlists.isLoading && playlists.albums.isEmpty {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let error = playlists.errorMessage, playlists.albums.isEmpty {
-                VStack(spacing: 12) {
-                    Text(error)
-                        .foregroundColor(OVK.Palette.textSecondary)
-                        .multilineTextAlignment(.center)
-                    Button("Повторить") { Task { await playlists.load(settings: settings) } }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
-            } else if playlists.albums.isEmpty {
-                Text("Нет плейлистов")
-                    .foregroundColor(OVK.Palette.textSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(playlists.albums) { album in
-                    NavigationLink {
-                        AlbumDetailView(album: album)
-                    } label: {
-                        AlbumRow(album: album)
-                    }
-                }
-                .listStyle(.plain)
-                .refreshable { await playlists.load(settings: settings) }
-            }
-        }
-        .task { await playlists.loadIfNeeded(settings: settings) }
-    }
-
-    // MARK: - Поиск (Треки / Альбомы)
-
-    private var searchSection: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $scope) {
-                Text("Треки").tag(Scope.tracks)
-                Text("Альбомы").tag(Scope.albums)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-
-            switch scope {
-            case .tracks: searchTracks
-            case .albums: searchAlbums
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var searchTracks: some View {
-        if search.isLoading && search.tracks.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if search.tracks.isEmpty {
-            emptySearch
-        } else {
-            List(search.tracks) { track in
-                AudioRow(track: track, showAddedBadge: true)
+        case .downloads:
+            ForEach(downloads.downloaded) { track in
+                AudioRow(track: track, showAddToLibrary: false)
                     .contentShape(Rectangle())
-                    .onTapGesture { tapTrack(track, in: search.tracks.filter { $0.isPlayable }, source: "Поиск") }
+                    .onTapGesture { tapTrack(track, in: downloads.downloaded, source: "Загрузки") }
             }
-            .listStyle(.plain)
-        }
-    }
-
-    @ViewBuilder
-    private var searchAlbums: some View {
-        if search.isLoading && search.albums.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if search.albums.isEmpty {
-            emptySearch
-        } else {
-            List(search.albums) { album in
+            .onMove { downloads.move(from: $0, to: $1) }
+            .onDelete { offsets in
+                offsets.map { downloads.downloaded[$0] }.forEach { downloads.remove($0) }
+            }
+        case .playlists:
+            ForEach(playlists.albums) { album in
                 NavigationLink {
                     AlbumDetailView(album: album)
                 } label: {
                     AlbumRow(album: album)
                 }
             }
-            .listStyle(.plain)
         }
     }
 
-    private var emptySearch: some View {
-        Text(search.tooShort
-             ? "Введите не менее \(SearchViewModel.minQueryLength) символов"
-             : "Ничего не найдено")
-            .foregroundColor(OVK.Palette.textSecondary)
-            .multilineTextAlignment(.center)
-            .padding()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    @ViewBuilder
+    private var searchRows: some View {
+        switch scope {
+        case .tracks:
+            ForEach(search.tracks) { track in
+                AudioRow(track: track, showAddedBadge: true)
+                    .contentShape(Rectangle())
+                    .onTapGesture { tapTrack(track, in: search.tracks.filter { $0.isPlayable }, source: "Поиск") }
+            }
+        case .albums:
+            ForEach(search.albums) { album in
+                NavigationLink {
+                    AlbumDetailView(album: album)
+                } label: {
+                    AlbumRow(album: album)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contentStateOverlay: some View {
+        if isSearching {
+            searchStateOverlay
+        } else {
+            libraryStateOverlay
+        }
+    }
+
+    @ViewBuilder
+    private var libraryStateOverlay: some View {
+        switch tab {
+        case .online:
+            if model.isLoading && model.tracks.isEmpty {
+                ProgressView()
+            } else if let error = model.errorMessage, model.tracks.isEmpty {
+                retryState(error) { await model.load(settings: settings) }
+            } else if model.tracks.isEmpty {
+                Text("Нет аудиозаписей").foregroundColor(OVK.Palette.textSecondary)
+            }
+        case .downloads:
+            if downloads.downloaded.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle").font(.largeTitle)
+                    Text("Нет скачанных треков")
+                    Text("Нажмите ↓ у трека во вкладке «Моя музыка», чтобы слушать офлайн")
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                }
+                .foregroundColor(OVK.Palette.textSecondary)
+                .padding()
+            }
+        case .playlists:
+            if playlists.isLoading && playlists.albums.isEmpty {
+                ProgressView()
+            } else if let error = playlists.errorMessage, playlists.albums.isEmpty {
+                retryState(error) { await playlists.load(settings: settings) }
+            } else if playlists.albums.isEmpty {
+                Text("Нет плейлистов").foregroundColor(OVK.Palette.textSecondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var searchStateOverlay: some View {
+        let resultsAreEmpty = scope == .tracks ? search.tracks.isEmpty : search.albums.isEmpty
+        let error = scope == .tracks ? search.trackErrorMessage : search.albumErrorMessage
+        if search.isLoading && resultsAreEmpty {
+            ProgressView()
+        } else if let error, resultsAreEmpty {
+            retryState(error) {
+                await search.run(query: searchText.trimmingCharacters(in: .whitespaces), settings: settings)
+            }
+        } else if resultsAreEmpty {
+            Text(search.tooShort
+                 ? "Введите не менее \(SearchViewModel.minQueryLength) символов"
+                 : "Ничего не найдено")
+                .foregroundColor(OVK.Palette.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding()
+        }
+    }
+
+    private func retryState(_ message: String, action: @escaping () async -> Void) -> some View {
+        VStack(spacing: 12) {
+            Text(message)
+                .foregroundColor(OVK.Palette.textSecondary)
+                .multilineTextAlignment(.center)
+            Button("Повторить") { Task { await action() } }
+        }
+        .padding()
+    }
+
+    private func refreshContent() async {
+        if isSearching {
+            await search.run(query: searchText.trimmingCharacters(in: .whitespaces), settings: settings)
+        } else if tab == .playlists {
+            await playlists.load(settings: settings)
+        } else if tab == .online {
+            await model.load(settings: settings)
+        }
+    }
+
+    private func scrollFillerHeight(in listHeight: CGFloat) -> CGFloat {
+        // ponytail: rows are at least the 44-pt tap target; measure actual content
+        // only if a future compact row becomes shorter and breaks initial hiding.
+        let rowCount: Int
+        if isSearching {
+            rowCount = scope == .tracks ? search.tracks.count : search.albums.count
+        } else {
+            switch tab {
+            case .online: rowCount = model.tracks.count
+            case .downloads: rowCount = downloads.downloaded.count
+            case .playlists: rowCount = playlists.albums.count
+            }
+        }
+        return max(0, listHeight - OVK.Metrics.minimumTapSize * CGFloat(rowCount + 1))
     }
 
     // MARK: - Воспроизведение
 
-    /// `autoDownload` — true только для вкладки «Онлайн» (Мои треки): там прослушанное
+    /// `autoDownload` — true только для вкладки «Моя музыка»: там прослушанное
     /// докачивается для офлайна. Поиск/Загрузки такого не делают.
     private func tapTrack(_ track: Audio, in list: [Audio], autoDownload: Bool = false, source: String? = nil) {
         if track.isPlayable || downloads.isDownloaded(track) {
@@ -293,4 +335,3 @@ struct AudioListView: View {
         // withdrawn (снят по копирайту) — не играется нигде, тап игнорируем.
     }
 }
-

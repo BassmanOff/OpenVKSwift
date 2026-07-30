@@ -16,16 +16,19 @@ struct AudioAttachPicker: View {
 
     var body: some View {
         NavigationView {
-            Group {
-                if isSearching {
-                    searchList
-                } else {
-                    libraryList
+            VStack(spacing: 0) {
+                OVKSearchStrip(text: $searchText, prompt: "Поиск треков")
+                Group {
+                    if isSearching {
+                        searchList
+                    } else {
+                        libraryList
+                    }
                 }
             }
+            .background(OVK.Palette.background.ignoresSafeArea())
             .navigationTitle("Прикрепить трек")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Поиск треков")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Отмена") { dismiss() }
@@ -46,15 +49,14 @@ struct AudioAttachPicker: View {
     @ViewBuilder
     private var libraryList: some View {
         if library.isLoading && library.tracks.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка треков…", isLoading: true)
         } else if library.tracks.isEmpty {
-            Text("В «Моей музыке» пока пусто")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "В «Моей музыке» пока пусто")
         } else {
             List(library.tracks) { track in
                 Button { pick(track) } label: { AudioRow(track: track, showAddToLibrary: false) }
                     .buttonStyle(.plain)
+                    .ovkPlainListRow()
             }
             .listStyle(.plain)
         }
@@ -63,19 +65,16 @@ struct AudioAttachPicker: View {
     @ViewBuilder
     private var searchList: some View {
         if search.tooShort {
-            Text("Введите не менее \(SearchViewModel.minQueryLength) символов")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Введите не менее \(SearchViewModel.minQueryLength) символов")
         } else if search.isLoading && search.tracks.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Поиск треков…", isLoading: true)
         } else if search.tracks.isEmpty {
-            Text(search.errorMessage ?? "Ничего не найдено")
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: search.trackErrorMessage ?? "Ничего не найдено")
         } else {
             List(search.tracks) { track in
                 Button { pick(track) } label: { AudioRow(track: track, showAddToLibrary: false, showAddedBadge: true) }
                     .buttonStyle(.plain)
+                    .ovkPlainListRow()
             }
             .listStyle(.plain)
         }

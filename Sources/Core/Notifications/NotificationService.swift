@@ -167,7 +167,11 @@ enum BackgroundRefresh {
         var notified = (defaults.dictionary(forKey: notifiedKey) as? [String: Int]) ?? [:]
 
         var authors: [Int: String] = [:]
-        for u in res.profiles ?? [] { authors[u.id] = u.fullName }
+        for u in res.profiles ?? [] {
+            authors[u.id] = ConversationIdentity.title(
+                peerID: u.id, currentUserID: settings.userID, fallback: u.fullName
+            )
+        }
 
         // Все непросмотренные входящие (для бейджа на иконке) — сервер знает про ≤1 на диалог.
         let unreadTotal = res.items.reduce(0) { sum, convo in

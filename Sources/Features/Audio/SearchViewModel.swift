@@ -8,7 +8,8 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     /// Запрос короче минимума полнотекстового индекса OpenVK (3 символа) — искать бесполезно.
     @Published private(set) var tooShort = false
-    @Published var errorMessage: String?
+    @Published private(set) var trackErrorMessage: String?
+    @Published private(set) var albumErrorMessage: String?
 
     /// Минимум символов для поиска: у MySQL/MariaDB FULLTEXT ft_min_word_len = 3–4,
     /// поэтому запросы из 1–2 символов не находят НИЧЕГО (это ограничение сервера, не бага).
@@ -17,7 +18,8 @@ final class SearchViewModel: ObservableObject {
     func clear() {
         tracks = []
         albums = []
-        errorMessage = nil
+        trackErrorMessage = nil
+        albumErrorMessage = nil
         tooShort = false
         isLoading = false
     }
@@ -29,14 +31,16 @@ final class SearchViewModel: ObservableObject {
 
         // Короткий запрос — сразу подсказка, без запроса к серверу.
         if q.count < Self.minQueryLength {
-            tracks = []; albums = []; errorMessage = nil; isLoading = false
+            tracks = []; albums = []
+            trackErrorMessage = nil; albumErrorMessage = nil; isLoading = false
             tooShort = true
             return
         }
         tooShort = false
 
         isLoading = true
-        errorMessage = nil
+        trackErrorMessage = nil
+        albumErrorMessage = nil
         defer { isLoading = false }
 
         let client = OVKClient(
@@ -44,8 +48,6 @@ final class SearchViewModel: ObservableObject {
             token: token,
             apiVersion: settings.apiVersion
         )
-
-        var anyOK = false
 
         // Убираем спец-символы BOOLEAN MODE, чтобы не сломать запрос (`+ - * " ( ) ~ < > @ %`).
         let sanitized = q.components(separatedBy: CharacterSet(charactersIn: "+-*\"()~<>@%")).joined(separator: " ")
@@ -62,10 +64,10 @@ final class SearchViewModel: ObservableObject {
             )
             if Task.isCancelled { return }
             tracks = res.items
-            anyOK = true
         } catch {
             if Task.isCancelled { return }
             tracks = []
+            trackErrorMessage = "Не удалось найти треки"
         }
 
         // Альбомы: метод audio.searchAlbums ждёт параметр `query`, drop_private=1 убирает null-элементы.
@@ -76,14 +78,10 @@ final class SearchViewModel: ObservableObject {
             )
             if Task.isCancelled { return }
             albums = res.items
-            anyOK = true
         } catch {
             if Task.isCancelled { return }
             albums = []
-        }
-
-        if !anyOK {
-            errorMessage = "Не удалось выполнить поиск"
+            albumErrorMessage = "Не удалось найти альбомы"
         }
     }
 }

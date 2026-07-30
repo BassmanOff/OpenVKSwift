@@ -43,42 +43,98 @@ struct ActivityView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.isLoading && model.notifications.isEmpty && model.friendRequests.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if model.notifications.isEmpty && model.friendRequests.isEmpty {
-            VStack(spacing: 8) {
-                Image(systemName: "bell.slash").font(.system(size: 40)).foregroundColor(OVK.Palette.textSecondary)
-                Text(model.errorMessage ?? "Пока нет уведомлений").foregroundColor(OVK.Palette.textSecondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        if model.isLoading && model.notifications.isEmpty && model.friendRequests.isEmpty && model.birthdayFriends.isEmpty {
+            OVKListStateView(message: "Загрузка уведомлений…", isLoading: true)
+        } else if model.notifications.isEmpty && model.friendRequests.isEmpty && model.birthdayFriends.isEmpty {
+            OVKListStateView(
+                message: model.errorMessage ?? "Пока нет уведомлений",
+                systemImage: "bell.slash"
+            )
         } else {
             List {
+                if !model.birthdayFriends.isEmpty {
+                    sectionHeader("Дни рождения")
+                    ForEach(model.birthdayFriends) { user in
+                        activityListRow { birthdayRow(user) }
+                    }
+                }
                 if !model.friendRequests.isEmpty {
-                    Section("Заявки в друзья") {
-                        ForEach(model.friendRequests) { user in
-                            requestRow(user)
-                        }
+                    sectionHeader("Заявки в друзья")
+                    ForEach(model.friendRequests) { user in
+                        activityListRow { requestRow(user) }
                     }
                 }
                 if !model.notifications.isEmpty {
-                    Section("Уведомления") {
-                        ForEach(model.notifications) { notif in
-                            notificationRow(notif)
-                                .onAppear {
-                                    if notif.id == model.notifications.last?.id {
-                                        Task { await model.loadMore(settings: settings) }
-                                    }
+                    sectionHeader("Уведомления")
+                    ForEach(model.notifications) { notif in
+                        activityListRow { notificationRow(notif) }
+                            .onAppear {
+                                if notif.id == model.notifications.last?.id {
+                                    Task { await model.loadMore(settings: settings) }
                                 }
-                        }
+                            }
                     }
                 }
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
             .refreshable { await model.reload(settings: settings) }
         }
     }
 
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.footnote)
+            .foregroundColor(OVK.Palette.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, OVK.Metrics.contentInset)
+            .frame(height: 30)
+            .background(OVK.Palette.background)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(OVK.Palette.background)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func activityListRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, OVK.Metrics.contentInset)
+            .padding(.vertical, 6)
+            .background(OVK.Palette.card.overlay(OVKHairline(), alignment: .bottom))
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(OVK.Palette.card)
+    }
+
     // MARK: Заявка в друзья
+
+    private func birthdayRow(_ user: User) -> some View {
+        Button { goProfile(user.id) } label: {
+            HStack(spacing: 10) {
+                CachedImage(url: user.avatarURL) {
+                    ZStack { OVK.Palette.background; Image(systemName: "person.crop.circle").foregroundColor(OVK.Palette.textSecondary) }
+                }
+                .frame(width: 44, height: 44)
+                .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(user.fullName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(OVK.Palette.textPrimary)
+                    Text("сегодня празднует день рождения")
+                        .font(.footnote)
+                        .foregroundColor(OVK.Palette.textSecondary)
+                }
+                Spacer()
+                Image(systemName: "gift.fill")
+                    .foregroundColor(OVK.Palette.primary)
+            }
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(user.fullName), сегодня день рождения")
+    }
 
     private func requestRow(_ user: User) -> some View {
         HStack(spacing: 10) {
@@ -94,11 +150,19 @@ struct ActivityView: View {
             Text(user.fullName).font(.subheadline).fontWeight(.medium).lineLimit(1)
             Spacer()
             Button("Принять") { Task { await model.accept(user, settings: settings) } }
-                .font(.caption).buttonStyle(.borderedProminent).tint(OVK.Palette.primary)
+                .font(.subheadline)
+                .foregroundColor(OVK.Palette.primary)
+                .frame(minHeight: OVK.Metrics.minimumTapSize)
+                .buttonStyle(.plain)
             Button { Task { await model.decline(user, settings: settings) } } label: {
-                Image(systemName: "xmark").font(.caption)
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(OVK.Palette.primary)
+                    .frame(width: OVK.Metrics.minimumTapSize,
+                           height: OVK.Metrics.minimumTapSize)
             }
-            .buttonStyle(.bordered).tint(.gray)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Отклонить заявку")
         }
         .padding(.vertical, 2)
     }
@@ -272,8 +336,8 @@ struct ActivityView: View {
 
     /// Аватар → профиль автора (сквозь handlesOVKLinks).
     private func goProfile(_ id: Int) {
-        guard let url = URL(string: "https://openvk.org/\(id > 0 ? "id\(id)" : "club\(-id)")") else { return }
-        openURL(url)
+        let path = id > 0 ? "id\(id)" : "club\(-id)"
+        openURL(settings.instance.webURL.appendingPathComponent(path))
     }
 
     // RelativeDateTimeFormatter дорог — держим статически (вызывается в каждой строке).

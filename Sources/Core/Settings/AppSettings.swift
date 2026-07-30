@@ -9,6 +9,9 @@ final class AppSettings: ObservableObject {
     }
     @Published private(set) var token: String?
     @Published private(set) var userID: Int?
+    @Published private(set) var savedAccounts: [SavedAccount]
+    /// Меняется при входе, выходе и переключении аккаунта, чтобы пересоздать экран и кэши.
+    @Published private(set) var sessionID: UUID
     /// Автозагрузка треков, добавленных в «Мою музыку» (вкл по умолчанию).
     @Published var autoDownloadMyTracks: Bool {
         didSet { defaults.set(autoDownloadMyTracks, forKey: autoDownloadKey) }
@@ -44,20 +47,47 @@ final class AppSettings: ObservableObject {
     @Published var messagePostFullCard: Bool {
         didSet { defaults.set(messagePostFullCard, forKey: postCardKey) }
     }
-    /// Параллельный экран плеера в стиле VK 7–8. ВЫКЛ по умолчанию.
+    /// Экран плеера в стиле VK 7–8. ВКЛ по умолчанию; явный выбор пользователя сохраняется.
     @Published var useNewPlayer: Bool {
         didSet { defaults.set(useNewPlayer, forKey: newPlayerKey) }
     }
+    /// Альтернативный вид из ранних сборок: квадратные аватары и зелёная точка онлайн
+    /// в профиле. По умолчанию выключен — оригинальный iOS 7-вид использует круги и текст.
+    @Published var legacyAvatarIndicators: Bool {
+        didSet { defaults.set(legacyAvatarIndicators, forKey: legacyAvatarIndicatorsKey) }
+    }
 
-    /// id альбома «_Private(OVK_iOS)», куда дублируются фото из ЛС (у OpenVK нет вложений
-    /// в личных сообщениях — шлём прямой линк на .jpeg из этого альбома). Создаётся при
-    /// первой отправке; ПЕР-АККАУНТНЫЙ — чистится при выходе (чужой id указал бы в чужой альбом).
-    var pmPhotoAlbumID: Int? {
-        get { defaults.object(forKey: pmAlbumKey) as? Int }
-        set {
-            if let newValue { defaults.set(newValue, forKey: pmAlbumKey) }
-            else { defaults.removeObject(forKey: pmAlbumKey) }
+    /// id альбома сервисного аккаунта для фото конкретного пользователя из ЛС.
+    func servicePMPhotoAlbumID(for userID: Int) -> Int? {
+        defaults.object(forKey: servicePMAlbumKey(userID)) as? Int
+    }
+    func setServicePMPhotoAlbumID(_ albumID: Int?, for userID: Int) {
+        let key = servicePMAlbumKey(userID)
+        if let albumID { defaults.set(albumID, forKey: key) }
+        else { defaults.removeObject(forKey: key) }
+    }
+    func servicePMPhotoReference(for messageID: Int, userID: Int) -> ServicePhotoReference? {
+        guard let data = defaults.data(forKey: ServicePhotoReference.storageKey(
+            userID: userID, messageID: messageID
+        )) else { return nil }
+        return try? JSONDecoder().decode(ServicePhotoReference.self, from: data)
+    }
+    func setServicePMPhotoReference(_ reference: ServicePhotoReference?, for messageID: Int, userID: Int) {
+        let key = ServicePhotoReference.storageKey(userID: userID, messageID: messageID)
+        if let reference, let data = try? JSONEncoder().encode(reference) {
+            defaults.set(data, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
         }
+    }
+    /// Временный локальный секрет сборки. Он не хранится в Git, но остаётся извлекаемым
+    /// из собранного IPA — заменить backend-токеном до распространения этой функции.
+    var serviceAccountToken: String? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "OVKServiceAccountToken") as? String else {
+            return nil
+        }
+        let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? nil : token
     }
     /// Показывали ли предупреждение, что фото из ЛС попадают в общедоступный альбом.
     var didWarnPMPhoto: Bool {
@@ -72,6 +102,7 @@ final class AppSettings: ObservableObject {
     private let defaults = UserDefaults.standard
     private let instanceKey = "selected_instance"
     private let userIDKey = "user_id"
+    private let savedAccountsKey = "saved_accounts"
     private let autoDownloadKey = "auto_download_my_tracks"
     private let notifyKey = "notify_messages"
     private let keepAliveKey = "background_keep_alive"
@@ -80,18 +111,36 @@ final class AppSettings: ObservableObject {
     private let archivedUnreadKey = "count_archived_unread"
     private let postCardKey = "message_post_full_card"
     private let newPlayerKey = "use_new_player"
-    private let pmAlbumKey = "pm_photo_album_id"
-    private let pmWarnKey = "pm_photo_warned"
+    private let legacyAvatarIndicatorsKey = "legacy_avatar_indicators"
+    private let pmWarnKey = "pm_service_photo_warned"
+
+    private func servicePMAlbumKey(_ userID: Int) -> String {
+        "service_pm_photo_album_id_\(userID)"
+    }
 
     init() {
+        let accountStore = KeychainStore()
+        let discardedAccounts: [SavedAccount]
         if let data = defaults.data(forKey: instanceKey),
            let saved = try? JSONDecoder().decode(Instance.self, from: data) {
-            instance = saved
+            instance = Instance.matchingPreset(for: saved) ?? saved
         } else {
             instance = .openvkOrg
         }
-        token = keychain.token
+        token = accountStore.token
         userID = defaults.object(forKey: userIDKey) as? Int
+        if let data = defaults.data(forKey: savedAccountsKey),
+           let accounts = try? JSONDecoder().decode([SavedAccount].self, from: data) {
+            let normalizedAccounts = SavedAccount.normalized(accounts, tokenFor: accountStore.token)
+            savedAccounts = normalizedAccounts
+            discardedAccounts = accounts.filter { account in
+                !normalizedAccounts.contains { $0.id == account.id }
+            }
+        } else {
+            savedAccounts = []
+            discardedAccounts = []
+        }
+        sessionID = UUID()
         autoDownloadMyTracks = defaults.object(forKey: autoDownloadKey) as? Bool ?? true
         notifyMessages = defaults.object(forKey: notifyKey) as? Bool ?? true
         backgroundKeepAlive = defaults.object(forKey: keepAliveKey) as? Bool ?? false
@@ -99,7 +148,18 @@ final class AppSettings: ObservableObject {
         enableCustomReactions = defaults.object(forKey: reactionsKey) as? Bool ?? true
         countArchivedUnread = defaults.object(forKey: archivedUnreadKey) as? Bool ?? true
         messagePostFullCard = defaults.object(forKey: postCardKey) as? Bool ?? false
-        useNewPlayer = defaults.object(forKey: newPlayerKey) as? Bool ?? false
+        useNewPlayer = defaults.object(forKey: newPlayerKey) as? Bool ?? true
+        legacyAvatarIndicators = defaults.object(forKey: legacyAvatarIndicatorsKey) as? Bool ?? false
+
+        for account in discardedAccounts {
+            keychain.setToken(nil, for: account)
+        }
+        persistAccounts()
+
+        // Миграция существующей единственной сессии в список аккаунтов.
+        if let token, let userID {
+            saveAccount(token: token, userID: userID)
+        }
     }
 
     var isLoggedIn: Bool { token != nil }
@@ -109,6 +169,9 @@ final class AppSettings: ObservableObject {
         defaults.set(userID, forKey: userIDKey)
         self.token = token
         self.userID = userID
+        saveAccount(token: token, userID: userID)
+        clearSessionWatermarks()
+        sessionID = UUID()
     }
 
     /// Дозаписывает userID, если он потерялся (например, токен уцелел в Keychain, а UserDefaults очистились).
@@ -116,18 +179,58 @@ final class AppSettings: ObservableObject {
         guard id > 0, userID != id else { return }
         defaults.set(id, forKey: userIDKey)
         userID = id
+        if let token { saveAccount(token: token, userID: id) }
+    }
+
+    /// Имя и аватар приходят из users.get при открытии собственного профиля.
+    func updateCurrentAccount(name: String, avatarURL: URL?) {
+        guard let userID, let index = savedAccounts.firstIndex(where: {
+            $0.userID == userID && $0.instance.apiURL == instance.apiURL
+        }) else { return }
+        guard savedAccounts[index].name != name || savedAccounts[index].avatarURL != avatarURL else { return }
+        savedAccounts[index].name = name
+        savedAccounts[index].avatarURL = avatarURL
+        persistAccounts()
+    }
+
+    func isCurrentAccount(_ account: SavedAccount) -> Bool {
+        token != nil && userID == account.userID && instance.apiURL == account.instance.apiURL
+    }
+
+    /// Возвращает false, если запись осталась, а её токен уже удалён из Keychain.
+    @discardableResult
+    func switchAccount(to account: SavedAccount) -> Bool {
+        guard !isCurrentAccount(account) else { return true }
+        guard let savedToken = keychain.token(for: account) else { return false }
+        instance = Instance.matchingPreset(for: account.instance) ?? account.instance
+        keychain.token = savedToken
+        defaults.set(account.userID, forKey: userIDKey)
+        token = savedToken
+        userID = account.userID
+        saveAccount(token: savedToken, userID: account.userID)
+        clearSessionWatermarks()
+        sessionID = UUID()
+        return true
+    }
+
+    func deleteAccount(_ account: SavedAccount) {
+        let deletingCurrent = isCurrentAccount(account)
+        keychain.setToken(nil, for: account)
+        savedAccounts.removeAll { $0.id == account.id }
+        persistAccounts()
+        if deletingCurrent {
+            for replacement in savedAccounts where switchAccount(to: replacement) { return }
+            signOut()
+        }
     }
 
     func signOut() {
         keychain.token = nil
         defaults.removeObject(forKey: userIDKey)
-        // Watermark'и уведомлений — персональные (другой аккаунт не должен их наследовать).
-        defaults.removeObject(forKey: "activity_notified_date")
-        defaults.removeObject(forKey: "msg_notified_last_ids")
-        // id альбома фото-ЛС — пер-аккаунтный (чужой указал бы в чужой альбом).
-        defaults.removeObject(forKey: pmAlbumKey)
+        clearSessionWatermarks()
         token = nil
         userID = nil
+        sessionID = UUID()
     }
 
     /// Сообщает серверу, что мы онлайн (платформа берётся из client_name токена → «с iPhone»).
@@ -158,4 +261,47 @@ final class AppSettings: ObservableObject {
             defaults.set(data, forKey: instanceKey)
         }
     }
+
+    private func saveAccount(token: String, userID: Int) {
+        let normalizedInstance = Instance.matchingPreset(for: instance) ?? instance
+        let id = "\(normalizedInstance.apiURL.absoluteString)#\(userID)"
+        let duplicates = savedAccounts.filter {
+            $0.id != id &&
+            $0.instance.apiURL == normalizedInstance.apiURL &&
+            keychain.token(for: $0) == token
+        }
+        for duplicate in duplicates {
+            keychain.setToken(nil, for: duplicate)
+        }
+        let duplicateIDs = Set(duplicates.map(\.id))
+        savedAccounts.removeAll { duplicateIDs.contains($0.id) }
+        let existing = savedAccounts.first { $0.id == id }
+        let account = SavedAccount(
+            userID: userID,
+            name: existing?.name ?? "ID \(userID)",
+            avatarURL: existing?.avatarURL,
+            instance: normalizedInstance
+        )
+        if let index = savedAccounts.firstIndex(where: { $0.id == id }) {
+            // Повторный вход обновляет существующую запись, а не создаёт дубликат.
+            savedAccounts[index] = account
+        } else {
+            savedAccounts.insert(account, at: 0)
+        }
+        keychain.setToken(token, for: account)
+        persistAccounts()
+    }
+
+    private func persistAccounts() {
+        if let data = try? JSONEncoder().encode(savedAccounts) {
+            defaults.set(data, forKey: savedAccountsKey)
+        }
+    }
+
+    private func clearSessionWatermarks() {
+        // Watermark'и уведомлений — персональные (другой аккаунт не должен их наследовать).
+        defaults.removeObject(forKey: "activity_notified_date")
+        defaults.removeObject(forKey: "msg_notified_last_ids")
+    }
+
 }

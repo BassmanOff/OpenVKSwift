@@ -93,11 +93,13 @@ struct ProfileEditView: View {
                         Text("Женский").tag(true)
                     }
                     DatePicker("Дата рождения", selection: $birthday, displayedComponents: .date)
-                    TextField("Telegram", text: $telegram)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .focused($focusedField, equals: .telegram)
-                        .id(FocusedField.telegram)
+                    if !settings.instance.isVepurOVK {
+                        TextField("Telegram", text: $telegram)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                            .focused($focusedField, equals: .telegram)
+                            .id(FocusedField.telegram)
+                    }
                 }
 
                 Section(header: Text("О себе")) {

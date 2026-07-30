@@ -29,6 +29,7 @@ final class ChatViewModel: ObservableObject {
 
     private var isSending = false
     private var raw: [Message] = []   // сырьё (с реакциями) для кэша и пересчёта
+    private let cacheScope = AccountCacheScope.current()
 
     // MARK: Пагинация истории
     /// Первая страница — маленькая (быстрое открытие); старое догружается прокруткой вверх.
@@ -104,8 +105,8 @@ final class ChatViewModel: ObservableObject {
         // Мгновенно показываем закэшированную переписку (в т.ч. офлайн), потом обновляем.
         // outRead восстанавливаем ИЗ КЭША ДО process: история и прочитанность публикуются
         // в одном тике → первый рендер сразу с верными галочками (без «одна → две»).
-        if messages.isEmpty, pending.isEmpty, let cached = Self.loadCache(peer: peerID) {
-            if let cachedRead = Self.loadReadCache(peer: peerID) { outRead = cachedRead }
+        if messages.isEmpty, pending.isEmpty, let cached = loadCache(peer: peerID) {
+            if let cachedRead = loadReadCache(peer: peerID) { outRead = cachedRead }
             process(cached, interpretReactions: settings.enableCustomReactions)
         }
         isLoading = messages.isEmpty
@@ -124,12 +125,12 @@ final class ChatViewModel: ObservableObject {
             let read = await fetchReadStateValue(peerID: peerID, settings: settings)
             if let read {
                 outRead = read
-                Self.saveReadCache(read, peer: peerID)
+                saveReadCache(read, peer: peerID)
             }
             let freshPage = Array(res.items.reversed())
             process(Self.merge(existing: raw, freshTail: freshPage),
                     interpretReactions: settings.enableCustomReactions)
-            Self.saveCache(raw, peer: peerID)
+            saveCache(raw, peer: peerID)
             if freshPage.count < Self.initialPageSize { canLoadOlder = false } // вся история уже тут
         } catch {
             if error.isCancellation { return }
@@ -160,7 +161,7 @@ final class ChatViewModel: ObservableObject {
                     let merged = Self.merge(existing: raw, freshTail: Array(fresh))
                     if merged != raw {
                         process(merged, interpretReactions: settings.enableCustomReactions)
-                        Self.saveCache(raw, peer: peerID)
+                        saveCache(raw, peer: peerID)
                     }
                 }
             }
@@ -200,7 +201,7 @@ final class ChatViewModel: ObservableObject {
             raw.append(message)
             messages.append(message)
         }
-        Self.saveCache(raw, peer: peerID)
+        saveCache(raw, peer: peerID)
         #if DEBUG
         print("[ViewModel] \(debugNow()) applyIncoming: id=\(messageID) вставлено (messages=\(messages.count))")
         #endif
@@ -235,7 +236,7 @@ final class ChatViewModel: ObservableObject {
         }
         olderOffsetBias = 0
         process(fresh + raw, interpretReactions: settings.enableCustomReactions)
-        Self.saveCache(raw, peer: peerID)
+        saveCache(raw, peer: peerID)
         if items.count < Self.olderPageSize { canLoadOlder = false }
     }
 
@@ -262,54 +263,47 @@ final class ChatViewModel: ObservableObject {
     private func fetchReadState(peerID: Int, settings: AppSettings) async {
         if let value = await fetchReadStateValue(peerID: peerID, settings: settings) {
             outRead = value
-            Self.saveReadCache(value, peer: peerID)
+            saveReadCache(value, peer: peerID)
         }
     }
 
     // MARK: - Дисковый кэш последней страницы переписки
 
-    private static func cacheURL(peer: Int) -> URL {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("chat_cache_\(peer).json")
+    private func cacheURL(peer: Int) -> URL {
+        cacheScope.file("chat_cache_\(peer).json")
     }
 
-    private static func saveCache(_ messages: [Message], peer: Int) {
+    private func saveCache(_ messages: [Message], peer: Int) {
         if let data = try? JSONEncoder().encode(messages) {
             try? data.write(to: cacheURL(peer: peer), options: .atomic)
         }
     }
 
-    private static func loadCache(peer: Int) -> [Message]? {
+    private func loadCache(peer: Int) -> [Message]? {
         guard let data = try? Data(contentsOf: cacheURL(peer: peer)) else { return nil }
         return try? JSONDecoder().decode([Message].self, from: data)
     }
 
     // Кэш out_read — отдельным крошечным файлом (формат кэша сообщений не меняем):
     // холодное открытие из кэша сразу рисует ПРАВИЛЬНЫЕ галочки, без «одна → две».
-    private static func readCacheURL(peer: Int) -> URL {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("chat_read_\(peer).json")
+    private func readCacheURL(peer: Int) -> URL {
+        cacheScope.file("chat_read_\(peer).json")
     }
 
-    private static func saveReadCache(_ value: Int, peer: Int) {
+    private func saveReadCache(_ value: Int, peer: Int) {
         if let data = try? JSONEncoder().encode(value) {
             try? data.write(to: readCacheURL(peer: peer), options: .atomic)
         }
     }
 
-    private static func loadReadCache(peer: Int) -> Int? {
+    private func loadReadCache(peer: Int) -> Int? {
         guard let data = try? Data(contentsOf: readCacheURL(peer: peer)) else { return nil }
         return try? JSONDecoder().decode(Int.self, from: data)
     }
 
     /// Стирает кэши всех переписок (при выходе из аккаунта — это личные данные).
     static func clearAllCaches() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let files = (try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil)) ?? []
-        for file in files where file.lastPathComponent.hasPrefix("chat_cache_")
-            || file.lastPathComponent.hasPrefix("chat_read_") {
-            try? FileManager.default.removeItem(at: file)
-        }
+        AccountCacheScope.current().removeFiles(prefixes: ["chat_cache_", "chat_read_"])
     }
 
     func send(peerID: Int, settings: AppSettings) async {
@@ -319,32 +313,51 @@ final class ChatViewModel: ObservableObject {
         await sendBody(body, peerID: peerID, settings: settings)
     }
 
-    /// Загружает фото в альбом «_Private(OVK_iOS)» (у OpenVK нет вложений в ЛС) и шлёт
-    /// прямую ссылку на .jpeg обычным сообщением — на приёме она рисуется фото-баблом.
+    /// Загружает фото в отдельный альбом отправителя (getHistory не возвращает вложения ЛС)
+    /// и шлёт прямую ссылку на .jpeg обычным сообщением — на приёме она рисуется фото-баблом.
     /// `onProgress`/`onError` — для тоста в UI (загрузка идёт заметное время).
     func sendPhoto(_ image: UIImage, peerID: Int, settings: AppSettings,
                    onProgress: (String) -> Void, onError: (String) -> Void) async {
-        guard let client = client(settings),
-              let data = image.normalizedOrientation().jpegData(compressionQuality: 0.9) else { return }
+        guard let token = settings.serviceAccountToken else {
+            onError("Сервисный аккаунт для фото не настроен")
+            return
+        }
+        guard let userID = settings.userID, userID > 0 else {
+            onError("Не удалось определить отправителя фото")
+            return
+        }
+        guard let data = image.normalizedOrientation().jpegData(compressionQuality: 0.9) else { return }
+        let client = OVKClient(instance: .openvkOrg, token: token, apiVersion: settings.apiVersion)
         onProgress("Загрузка фото…")
         do {
             let photo: Photo?
             do {
                 photo = try await client.uploadPhotoToAlbum(
-                    jpeg: data, albumID: try await ensurePMAlbum(client: client, settings: settings)
+                    jpeg: data,
+                    albumID: try await ensurePMAlbum(client: client, settings: settings, userID: userID)
                 )
             } catch OVKError.api(let code, _) where code == 114 {
                 // Сохранённый альбом удалён на сайте — сбрасываем кэш, пересоздаём, повторяем раз.
-                settings.pmPhotoAlbumID = nil
+                settings.setServicePMPhotoAlbumID(nil, for: userID)
                 photo = try await client.uploadPhotoToAlbum(
-                    jpeg: data, albumID: try await ensurePMAlbum(client: client, settings: settings)
+                    jpeg: data,
+                    albumID: try await ensurePMAlbum(client: client, settings: settings, userID: userID)
                 )
             }
-            guard let url = photo?.bestURL else {
+            guard let photo, let url = photo.bestURL,
+                  let reference = ServicePhotoReference(ownerID: photo.ownerID, photoID: photo.photoID) else {
                 onError("Не удалось загрузить фото")
                 return
             }
-            await sendBody(url.absoluteString, peerID: peerID, settings: settings)
+            let messageID = await sendBody(
+                url.absoluteString, peerID: peerID, settings: settings, servicePhoto: reference
+            )
+            if messageID == nil {
+                // Сообщение не ушло — загруженное фото не должно остаться сиротой.
+                try? await client.execute("photos.delete", params: [
+                    "owner_id": String(reference.ownerID), "photo_id": String(reference.photoID)
+                ])
+            }
         } catch {
             if error.isCancellation { return }
             onError(error.localizedDescription)
@@ -353,16 +366,37 @@ final class ChatViewModel: ObservableObject {
 
     /// id альбома фото-ЛС: берём сохранённый или создаём. Если сохранённый протух (альбом
     /// удалили на сайте) — upload упадёт кодом 114, тогда сбрасываем кэш и пересоздаём (один раз).
-    private func ensurePMAlbum(client: OVKClient, settings: AppSettings) async throws -> Int {
-        if let id = settings.pmPhotoAlbumID { return id }
-        let album = try await client.createPhotoAlbum(title: "_Private(OVK_iOS)",
-                                                      description: "Фото из личных сообщений (OVK iOS)")
-        settings.pmPhotoAlbumID = album.albumID
+    private func ensurePMAlbum(client: OVKClient, settings: AppSettings, userID: Int) async throws -> Int {
+        if let id = settings.servicePMPhotoAlbumID(for: userID) { return id }
+        let title = "_OVK_iOS_PM_id\(userID)"
+        let albums: ItemsResponse<Album> = try await client.call(
+            "photos.getAlbums", params: ["need_system": "0", "count": "1000"]
+        )
+        if let album = albums.items.first(where: { $0.title == title }) {
+            settings.setServicePMPhotoAlbumID(album.albumID, for: userID)
+            return album.albumID
+        }
+        // ponytail: две одновременные первые загрузки одного пользователя могут создать дубликаты;
+        // backend позже сериализует создание альбома.
+        let album = try await client.createPhotoAlbum(
+            title: title,
+            description: "Фото из личных сообщений пользователя id\(userID) (OVK iOS)"
+        )
+        settings.setServicePMPhotoAlbumID(album.albumID, for: userID)
         return album.albumID
     }
 
-    private func sendBody(_ body: String, peerID: Int, settings: AppSettings) async {
-        guard let client = client(settings), !body.isEmpty else { return }
+    /// В истории ЛС нет сериализованных аудио-вложений, поэтому шлём страницу выбранного
+    /// трека и подпись: на компьютере запись можно открыть и добавить в коллекцию.
+    func sendAudio(_ track: Audio, peerID: Int, settings: AppSettings) async {
+        let payload = track.messageAttachmentText(webURL: settings.instance.webURL)
+        await sendBody(payload, peerID: peerID, settings: settings)
+    }
+
+    @discardableResult
+    private func sendBody(_ body: String, peerID: Int, settings: AppSettings,
+                          servicePhoto: ServicePhotoReference? = nil) async -> Int? {
+        guard let client = client(settings), !body.isEmpty else { return nil }
         // Мгновенно показываем сообщение как «отправляется» (оптимистично).
         let optimistic = PendingMessage(text: body, date: Int(Date().timeIntervalSince1970))
         pending.append(optimistic)
@@ -376,6 +410,9 @@ final class ChatViewModel: ObservableObject {
             #if DEBUG
             print("[Send] \(debugNow()) отправлено: serverID=\(serverID) text=\"\(body.prefix(30))\"")
             #endif
+            if let servicePhoto, let userID = settings.userID {
+                settings.setServicePMPhotoReference(servicePhoto, for: serverID, userID: userID)
+            }
 
             // ЗАМЕНЯЕМ оптимистичное настоящим ДО reload — чтобы ни один промежуточный
             // reloadFromModel / DispatchQueue.main.async не застал оба в одном снапшоте.
@@ -393,7 +430,7 @@ final class ChatViewModel: ObservableObject {
                 raw.append(real)
                 messages.append(real)
             }
-            Self.saveCache(raw, peer: peerID)
+            saveCache(raw, peer: peerID)
             #if DEBUG
             print("[Send] \(debugNow()) оптимистичное \(optimistic.id) заменено на m\(serverID) (messages=\(messages.count))")
             #endif
@@ -401,9 +438,11 @@ final class ChatViewModel: ObservableObject {
             // Фоновая сверка с сервером: сообщение m(serverID) уже в raw → merge() внутри
             // reloadAfterSend не создаст дубль (merge фильтрует existing.id < minFresh).
             await reloadAfterSend(peerID: peerID, settings: settings)
+            return serverID
         } catch {
             // Не отправилось — помечаем крестиком (сообщение остаётся видимым).
             if let i = pending.firstIndex(where: { $0.id == optimistic.id }) { pending[i].failed = true }
+            return nil
         }
     }
 
@@ -415,7 +454,7 @@ final class ChatViewModel: ObservableObject {
             // merge: свежий хвост НЕ выбрасывает историю, догруженную пагинацией.
             process(Self.merge(existing: raw, freshTail: Array(res.items.reversed())),
                     interpretReactions: settings.enableCustomReactions)
-            Self.saveCache(raw, peer: peerID)
+            saveCache(raw, peer: peerID)
         }
         await fetchReadState(peerID: peerID, settings: settings)
     }
@@ -476,18 +515,29 @@ final class ChatViewModel: ObservableObject {
     /// Удаление сообщения (messages.delete). Оптимистично убираем из списка.
     func delete(messageID: Int, peerID: Int, settings: AppSettings) async {
         guard let client = client(settings) else { return }
+        let userID = settings.userID
+        let photo = userID.flatMap { settings.servicePMPhotoReference(for: messageID, userID: $0) }
         messages.removeAll { $0.id == messageID }
         raw.removeAll { $0.id == messageID }
-        _ = try? await client.rawResponse(
-            "messages.delete", params: ["message_ids": String(messageID)]
-        )
-        Self.saveCache(raw, peer: peerID)
+        saveCache(raw, peer: peerID)
+        do {
+            try await client.execute("messages.delete", params: ["message_ids": String(messageID)])
+        } catch {
+            return // Сообщение осталось на сервере — фото пока тоже оставляем.
+        }
+        guard let photo, let userID, let token = settings.serviceAccountToken else { return }
+        let serviceClient = OVKClient(instance: .openvkOrg, token: token, apiVersion: settings.apiVersion)
+        try? await serviceClient.execute("photos.delete", params: [
+            "owner_id": String(photo.ownerID), "photo_id": String(photo.photoID)
+        ])
+        settings.setServicePMPhotoReference(nil, for: messageID, userID: userID)
     }
 
     /// Отправляет статус «печатает» собеседнику (messages.setActivity type=typing).
     /// Статус на сервере живёт ~6с — чаще раза в ~4с слать незачем (троттлинг).
     private var lastTypingSent = Date.distantPast
     func sendTyping(peerID: Int, settings: AppSettings) async {
+        guard settings.instance.supportsTypingActivity else { return }
         guard let client = client(settings) else { return }
         guard Date().timeIntervalSince(lastTypingSent) > 4 else { return }
         lastTypingSent = Date()
@@ -520,6 +570,7 @@ struct ChatView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var longPoll: LongPollService
     @EnvironmentObject private var photoHero: PhotoHeroCoordinator
+    @EnvironmentObject private var library: LibraryManager
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = ChatViewModel()
     /// Свой роутер, а НЕ @Environment(\.openURL): тот резолвится из окружения ChatView САМОГО
@@ -530,25 +581,29 @@ struct ChatView: View {
     /// это выталкивало ChatView из стека, и «закрыть» возвращало к списку диалогов, а не в чат.
     @StateObject private var linkRouter = LinkRouter()
     @State private var toast: String?
+    @State private var showAttachMenu = false
     @State private var showPhotoPicker = false
+    @State private var showCameraPicker = false
+    @State private var showAudioPicker = false
     @State private var showPhotoNotice = false
+    @State private var openCameraAfterNotice = false
 
     var body: some View {
         ZStack {
             ChatScreen(model: model, peerID: peerID,
                        onToast: { toast = $0 },
-                       onOpenURL: { url in _ = linkRouter.open(url) }, // пушится ЛОКАЛЬНО, в стек этого чата
+                       onOpenURL: { url in
+                           // Внутренние ссылки пушим в стек чата; аудио и внешние URL —
+                           // системно, иначе нераспознанный LinkRouter оставлял тап без действия.
+                           if !linkRouter.open(url) { UIApplication.shared.open(url) }
+                       },
                        onOpenImage: { url, view in
                            // Тот же полноэкранный UIKit-просмотрщик, что в ленте/комментариях.
                            let photo = Photo.remote(url: url)
                            photoHero.registerSource(view, for: photo.id) // закрытие «влетит» обратно
                            photoHero.present(photos: [photo], index: 0, post: nil, from: view)
                        },
-                       onAttach: {
-                           // Первый раз — предупреждаем про общедоступный альбом, потом сразу пикер.
-                           if settings.didWarnPMPhoto { showPhotoPicker = true }
-                           else { showPhotoNotice = true }
-                       })
+                       onAttach: { showAttachMenu = true })
                 // Клавиатуру обрабатывает UIKit-контроллер (нативные уведомления).
                 .ignoresSafeArea(.keyboard, edges: .bottom)
 
@@ -572,6 +627,23 @@ struct ChatView: View {
             } label: { EmptyView() }
             .hidden()
         )
+        .confirmationDialog("Прикрепить", isPresented: $showAttachMenu) {
+            Button("Фото") {
+                openCameraAfterNotice = false
+                if settings.didWarnPMPhoto { showPhotoPicker = true }
+                else { showPhotoNotice = true }
+            }
+            Button("Камера") {
+                guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+                    toast = "Камера недоступна"
+                    return
+                }
+                openCameraAfterNotice = true
+                if settings.didWarnPMPhoto { showCameraPicker = true }
+                else { showPhotoNotice = true }
+            }
+            Button("Аудио") { showAudioPicker = true }
+        }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker { image in
                 Task {
@@ -580,15 +652,33 @@ struct ChatView: View {
                 }
             }
         }
+        .fullScreenCover(isPresented: $showCameraPicker) {
+            CameraPicker { image in
+                Task {
+                    await model.sendPhoto(image, peerID: peerID, settings: settings,
+                                          onProgress: { toast = $0 }, onError: { toast = $0 })
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showAudioPicker) {
+            AudioAttachPicker { track in
+                Task {
+                    await model.sendAudio(track, peerID: peerID, settings: settings)
+                }
+            }
+        }
         .alert("Фото в личных сообщениях", isPresented: $showPhotoNotice) {
             Button("Отмена", role: .cancel) {}
             Button("Продолжить") {
                 settings.didWarnPMPhoto = true
-                showPhotoPicker = true
+                if openCameraAfterNotice { showCameraPicker = true }
+                else { showPhotoPicker = true }
             }
         } message: {
-            Text("OpenVK не поддерживает вложения в личных сообщениях. Все отправляемые фото "
-                 + "дублируются в отдельный альбом «_Private(OVK_iOS)», который доступен всем. "
+            Text("OpenVK не возвращает вложения в истории личных сообщений. Отправляемые фото "
+                 + "временно сохраняются в отдельном альбоме вашего аккаунта на сервисном аккаунте "
+                 + "и доступны по прямой ссылке. "
                  + "Не отправляйте так конфиденциальные изображения.")
         }
         .handlesOVKLinks() // без этого ссылки в сообщениях пушатся в корень вкладки «Сообщения», а не сюда
@@ -607,7 +697,7 @@ struct ChatView: View {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.backward")
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(OVK.Palette.primary)
+                        .foregroundColor(.white)
                         .frame(width: 32, height: 32)
                 }
             }
@@ -622,12 +712,12 @@ struct ChatView: View {
                             }
                         }
                         .frame(width: 30, height: 30)
-                        .clipShape(Circle())
+                        .cornerRadius(OVK.Metrics.compactCornerRadius)
                         // Фиксированный размер шрифта: иначе после анимации перехода имя
                         // «подрастало» и обрезалось. Длинное имя мягко ужимается.
                         Text(title)
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(OVK.Palette.textPrimary)
+                            .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
                     }
@@ -638,6 +728,7 @@ struct ChatView: View {
             }
         }
         .toast($toast)
+        .toast($library.toast)
         // Мгновенная доставка: событие LongPoll вставляется в переписку СРАЗУ (один publish,
         // ~кадр), а серверная сверка идёт следом в фоне (дедуп по id внутри merge/poll).
         .onReceive(longPoll.newMessage) { event in
@@ -669,7 +760,8 @@ struct ChatView: View {
     }
 
     private func openProfile() {
-        guard let url = URL(string: "https://openvk.org/id\(peerID)") else { return }
-        _ = linkRouter.open(url) // пушится в стек этого чата, см. linkRouter
+        _ = linkRouter.open(
+            settings.instance.webURL.appendingPathComponent("id\(peerID)")
+        ) // пушится в стек этого чата, см. linkRouter
     }
 }

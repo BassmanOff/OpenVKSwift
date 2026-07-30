@@ -10,7 +10,6 @@ struct GroupView: View {
 
     private enum Route: Hashable { case members, audio, topics }
     @State private var route: Route?
-    @State private var showCompose = false
     /// Смена аватара сообщества (только для админов): «...» в просмотрщике → выбор источника → пикер.
     @State private var showAvatarSourceDialog = false
     @State private var showCameraPicker = false
@@ -27,6 +26,14 @@ struct GroupView: View {
             if let desc = info.description, !desc.isEmpty {
                 card { descriptionView(desc) }
             }
+            if info.isAdmin || info.canPost {
+                card {
+                    WallPublishControls(ownerID: ownerID,
+                                        groupName: info.isAdmin ? info.name : nil) {
+                        Task { await wall.reload(ownerID: ownerID, settings: settings) }
+                    }
+                }
+            }
 
             if wall.posts.isEmpty && !wall.isLoading {
                 card {
@@ -36,13 +43,12 @@ struct GroupView: View {
                 }
             } else {
                 ForEach(wall.posts) { post in
-                    card {
-                        PostRow(post: post, authors: wall.authors, onDelete: { p in
-                            Task { await wall.delete(p, settings: settings) }
-                        }, onEdited: { p in
-                            Task { await wall.refreshPost(ownerID: p.ownerID, postID: p.postID, settings: settings) }
-                        })
-                    }
+                    PostRow(post: post, authors: wall.authors, onDelete: { p in
+                        Task { await wall.delete(p, settings: settings) }
+                    }, onEdited: { p in
+                        Task { await wall.refreshPost(ownerID: p.ownerID, postID: p.postID, settings: settings) }
+                    })
+                    .ovkPostListRow()
                     .onAppear {
                         if post.id == wall.posts.last?.id {
                             Task { await wall.loadMore(ownerID: ownerID, settings: settings) }
@@ -71,20 +77,6 @@ struct GroupView: View {
         )
         .navigationTitle(community.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if info.isAdmin {
-                    Button { showCompose = true } label: {
-                        Image(systemName: "square.and.pencil")
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showCompose) {
-            NewPostView(ownerID: ownerID, groupName: info.name) {
-                Task { await wall.reload(ownerID: ownerID, settings: settings) }
-            }
-        }
         .alert("Ошибка", isPresented: Binding(
             get: { avatarUploadError != nil },
             set: { if !$0 { avatarUploadError = nil } }
@@ -93,6 +85,7 @@ struct GroupView: View {
         } message: {
             Text(avatarUploadError ?? "")
         }
+        .toast($wall.errorMessage)
         .handlesOVKLinks() // без этого ссылки из постов (плейлист и т.п.) пушатся в корень вкладки, а не сюда
         .task {
             await detail.load(community: community, settings: settings)
@@ -279,7 +272,7 @@ final class GroupDetailViewModel: ObservableObject {
             // groups.getById возвращает массив клубов в response.
             let items: [Community] = try await client.call(
                 "groups.getById",
-                params: ["group_id": String(community.groupID), "fields": "description,members_count,photo_200,photo_100,photo_max,is_admin,is_member"]
+                params: ["group_id": String(community.groupID), "fields": "description,members_count,photo_200,photo_100,photo_max,is_admin,is_member,can_post"]
             )
             // Берём описание/аватар/счётчики, но НЕ доверяем is_member из getById:
             // он не всегда заполнен и мог бы затереть верный статус на «Вступить».

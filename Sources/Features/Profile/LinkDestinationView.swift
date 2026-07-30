@@ -117,7 +117,10 @@ struct LinkDestinationView: View {
             TopicView(groupID: groupID, topicDBID: nil, virtualIDGuess: virtualID, title: "Обсуждение")
         case .post(let ownerID, let postID):
             // Стена: открываем пост с комментариями (PostRow переиспользуется внутри).
-            CommentsView(ownerID: ownerID, postID: postID, fallbackIDs: [], post: nil)
+            CommentsView(
+                ownerID: ownerID, postID: postID, fallbackIDs: [], post: nil,
+                usesExistingNavigation: true
+            )
         case .photo(let ownerID, let photoID):
             PhotoLinkLoader(ownerID: ownerID, photoID: photoID)
         case .video(let ownerID, let videoID):

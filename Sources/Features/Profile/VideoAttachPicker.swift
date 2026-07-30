@@ -17,16 +17,19 @@ struct VideoAttachPicker: View {
 
     var body: some View {
         NavigationView {
-            Group {
-                if showingSearch {
-                    list(searchResults, empty: "Ничего не найдено", loading: isSearching)
-                } else {
-                    list(library.videos, empty: "Нет видеозаписей", loading: library.isLoading)
+            VStack(spacing: 0) {
+                OVKSearchStrip(text: $searchText, prompt: "Поиск видео")
+                Group {
+                    if showingSearch {
+                        list(searchResults, empty: "Ничего не найдено", loading: isSearching)
+                    } else {
+                        list(library.videos, empty: "Нет видеозаписей", loading: library.isLoading)
+                    }
                 }
             }
+            .background(OVK.Palette.background.ignoresSafeArea())
             .navigationTitle("Прикрепить видео")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Поиск видео")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Отмена") { dismiss() }
@@ -48,15 +51,14 @@ struct VideoAttachPicker: View {
     @ViewBuilder
     private func list(_ videos: [Video], empty: String, loading: Bool) -> some View {
         if loading && videos.isEmpty {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: "Загрузка видео…", isLoading: true)
         } else if videos.isEmpty {
-            Text(empty)
-                .foregroundColor(OVK.Palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            OVKListStateView(message: empty)
         } else {
             List(videos) { video in
                 Button { onPick(video); dismiss() } label: { row(video) }
                     .buttonStyle(.plain)
+                    .ovkPlainListRow()
             }
             .listStyle(.plain)
         }
